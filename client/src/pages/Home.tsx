@@ -17,9 +17,9 @@ import {
   ShoppingBag,
   AlertCircle,
   X,
+  Filter,
 } from "lucide-react";
 
-// Types
 interface AppInfo {
   id: string;
   name: string;
@@ -44,6 +44,7 @@ interface CountryResult {
   currency: string;
   symbol: string;
   flag: string;
+  region: string;
   items: IAPItemWithTWD[];
   error?: string;
 }
@@ -55,21 +56,14 @@ interface CompareResult {
   ratesUpdatedAt: number;
 }
 
-// 取得所有唯一的 IAP 名稱（用於比對）
 function normalizeIAPName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[×x×]/g, "x")
-    .replace(/\s+/g, " ")
-    .trim();
+  return name.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-// 找出每個 IAP 項目在各國的最低台幣價格
 function buildComparisonTable(countries: CountryResult[]) {
-  // 收集所有 IAP 項目（以數量/幣值特徵分組）
   const itemMap = new Map<
     string,
-    { displayName: string; countryPrices: Map<string, { twd: number; formatted: string; original: string }> }
+    { displayName: string; countryPrices: Map<string, { twd: number; formatted: string }> }
   >();
 
   for (const country of countries) {
@@ -79,31 +73,27 @@ function buildComparisonTable(countries: CountryResult[]) {
         itemMap.set(key, { displayName: item.name, countryPrices: new Map() });
       }
       const entry = itemMap.get(key)!;
-      // 如果同一國家有多個同名項目，取最便宜的
       const existing = entry.countryPrices.get(country.countryCode);
       if (!existing || item.twdAmount < existing.twd) {
         entry.countryPrices.set(country.countryCode, {
           twd: item.twdAmount,
           formatted: item.formattedPrice,
-          original: `${item.formattedPrice}`,
         });
       }
     }
   }
 
-  return Array.from(itemMap.entries()).map(([key, val]) => {
-    const prices = Array.from(val.countryPrices.entries());
-    const minTWD = Math.min(...prices.map(([, p]) => p.twd));
-    const cheapestCountries = prices.filter(([, p]) => p.twd === minTWD).map(([code]) => code);
-    return {
-      key,
-      displayName: val.displayName,
-      countryPrices: val.countryPrices,
-      minTWD,
-      cheapestCountries,
-    };
-  });
+  return Array.from(itemMap.entries())
+    .map(([key, val]) => {
+      const prices = Array.from(val.countryPrices.entries());
+      const minTWD = Math.min(...prices.map(([, p]) => p.twd));
+      const cheapestCountries = prices.filter(([, p]) => p.twd === minTWD).map(([code]) => code);
+      return { key, displayName: val.displayName, countryPrices: val.countryPrices, minTWD, cheapestCountries };
+    })
+    .sort((a, b) => a.minTWD - b.minTWD);
 }
+
+const REGIONS = ["全部", "亞太", "歐洲", "美洲", "中東", "非洲"];
 
 export default function Home() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -114,23 +104,16 @@ export default function Home() {
   const [isComparing, setIsComparing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+  const [selectedRegion, setSelectedRegion] = useState("全部");
+  const [showOnlyWithData, setShowOnlyWithData] = useState(true);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // tRPC mutations & queries
-  const searchMutation = trpc.appstore.search.useQuery(
-    { term: searchTerm },
-    { enabled: false }
-  );
+  const searchMutation = trpc.appstore.search.useQuery({ term: searchTerm }, { enabled: false });
   const compareMutation = trpc.appstore.compareIAP.useMutation();
   const historyQuery = trpc.history.list.useQuery(undefined, { enabled: showHistory });
-  const deleteHistoryMutation = trpc.history.delete.useMutation({
-    onSuccess: () => historyQuery.refetch(),
-  });
-  const clearHistoryMutation = trpc.history.clear.useMutation({
-    onSuccess: () => historyQuery.refetch(),
-  });
+  const deleteHistoryMutation = trpc.history.delete.useMutation({ onSuccess: () => historyQuery.refetch() });
+  const clearHistoryMutation = trpc.history.clear.useMutation({ onSuccess: () => historyQuery.refetch() });
 
-  // 搜尋遊戲
   const handleSearch = useCallback(async () => {
     if (!searchTerm.trim()) return;
     setIsSearching(true);
@@ -141,9 +124,7 @@ export default function Home() {
       const result = await searchMutation.refetch();
       if (result.data) {
         setSearchResults(result.data as AppInfo[]);
-        if (result.data.length === 0) {
-          toast.info("找不到相關遊戲，請嘗試其他關鍵字");
-        }
+        if (result.data.length === 0) toast.info("找不到相關遊戲，請嘗試其他關鍵字");
       }
     } catch {
       toast.error("搜尋失敗，請稍後再試");
@@ -152,12 +133,12 @@ export default function Home() {
     }
   }, [searchTerm, searchMutation]);
 
-  // 選擇遊戲並開始比價
   const handleSelectApp = useCallback(
     async (app: AppInfo) => {
       setSelectedApp(app);
       setSearchResults([]);
       setCompareResult(null);
+      setExpandedItems(new Set());
       setIsComparing(true);
       try {
         const result = await compareMutation.mutateAsync({
@@ -177,7 +158,6 @@ export default function Home() {
     [compareMutation, showHistory, historyQuery]
   );
 
-  // 從歷史記錄重新查詢
   const handleHistoryClick = useCallback(
     async (appId: string, appName: string, appIcon?: string | null, developer?: string | null) => {
       const app: AppInfo = { id: appId, name: appName, icon: appIcon || "", developer: developer || "", genre: "", url: "" };
@@ -196,11 +176,9 @@ export default function Home() {
     });
   };
 
-  // 建立比較表格資料
   const comparisonTable = compareResult ? buildComparisonTable(compareResult.countries) : [];
-  const availableCountries = compareResult
-    ? compareResult.countries.filter((c) => c.items.length > 0)
-    : [];
+  const availableCountries = compareResult ? compareResult.countries.filter((c) => c.items.length > 0) : [];
+  const totalCountries = compareResult ? compareResult.countries.length : 0;
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -213,7 +191,7 @@ export default function Home() {
             </div>
             <div>
               <h1 className="text-sm font-bold text-foreground leading-none">App Store 比價工具</h1>
-              <p className="text-xs text-muted-foreground mt-0.5">各國內購價格比較 · 換算台幣</p>
+              <p className="text-xs text-muted-foreground mt-0.5">全球 130+ 國家內購價格比較 · 換算台幣</p>
             </div>
           </div>
           <Button
@@ -229,7 +207,7 @@ export default function Home() {
       </header>
 
       <div className="container py-6 space-y-6">
-        {/* Search Section */}
+        {/* Search */}
         <div className="max-w-2xl mx-auto space-y-3">
           <div className="flex gap-2">
             <div className="relative flex-1">
@@ -249,7 +227,7 @@ export default function Home() {
             </Button>
           </div>
 
-          {/* Search Results Dropdown */}
+          {/* Search Results */}
           {searchResults.length > 0 && (
             <div className="bg-card border border-border rounded-lg overflow-hidden shadow-lg">
               <div className="px-3 py-2 border-b border-border flex items-center justify-between">
@@ -276,9 +254,7 @@ export default function Home() {
                       <p className="text-sm font-medium text-foreground truncate">{app.name}</p>
                       <p className="text-xs text-muted-foreground truncate">{app.developer} · {app.genre}</p>
                     </div>
-                    <Badge variant="secondary" className="text-xs flex-shrink-0">
-                      ID: {app.id}
-                    </Badge>
+                    <Badge variant="secondary" className="text-xs flex-shrink-0">ID: {app.id}</Badge>
                   </button>
                 ))}
               </div>
@@ -286,7 +262,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* History Panel */}
+        {/* History */}
         {showHistory && (
           <div className="max-w-2xl mx-auto bg-card border border-border rounded-lg overflow-hidden">
             <div className="px-4 py-3 border-b border-border flex items-center justify-between">
@@ -295,20 +271,16 @@ export default function Home() {
                 <span className="text-sm font-medium text-foreground">查詢歷史</span>
               </div>
               <Button
-                variant="ghost"
-                size="sm"
+                variant="ghost" size="sm"
                 onClick={() => clearHistoryMutation.mutate()}
                 disabled={clearHistoryMutation.isPending}
                 className="text-xs text-muted-foreground hover:text-destructive gap-1"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                清除全部
+                <Trash2 className="w-3.5 h-3.5" />清除全部
               </Button>
             </div>
             {historyQuery.isLoading ? (
-              <div className="py-6 flex justify-center">
-                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-              </div>
+              <div className="py-6 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
             ) : historyQuery.data && historyQuery.data.length > 0 ? (
               <div className="divide-y divide-border">
                 {historyQuery.data.map((item) => (
@@ -344,7 +316,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* Loading State */}
+        {/* Loading */}
         {isComparing && (
           <div className="max-w-4xl mx-auto">
             <div className="bg-card border border-border rounded-xl p-8 text-center space-y-4">
@@ -355,30 +327,22 @@ export default function Home() {
                 </div>
               </div>
               <div>
-                <p className="text-foreground font-medium">正在查詢各國 App Store 價格...</p>
-                <p className="text-sm text-muted-foreground mt-1">同時爬取 15 個國家/地區的內購資料，請稍候</p>
+                <p className="text-foreground font-medium">正在查詢全球 App Store 價格...</p>
+                <p className="text-sm text-muted-foreground mt-1">同時爬取 130+ 個國家/地區的內購資料，請稍候約 15-30 秒</p>
               </div>
-              <div className="flex flex-wrap justify-center gap-1.5">
-                {["🇹🇼", "🇯🇵", "🇺🇸", "🇭🇰", "🇰🇷", "🇨🇳", "🇸🇬", "🇬🇧", "🇦🇺", "🇹🇭", "🇹🇷", "🇲🇽", "🇧🇷", "🇷🇺", "🇸🇦"].map(
-                  (flag, i) => (
-                    <span
-                      key={i}
-                      className="text-lg opacity-50 animate-pulse"
-                      style={{ animationDelay: `${i * 100}ms` }}
-                    >
-                      {flag}
-                    </span>
-                  )
-                )}
+              <div className="flex flex-wrap justify-center gap-1">
+                {["🇹🇼","🇯🇵","🇺🇸","🇬🇧","🇩🇪","🇫🇷","🇰🇷","🇨🇳","🇭🇰","🇸🇬","🇦🇺","🇮🇳","🇧🇷","🇲🇽","🇦🇷","🇹🇷","🇷🇺","🇸🇦","🇦🇪","🇿🇦","🇳🇬","🇰🇪","🇵🇱","🇸🇪","🇳🇴"].map((flag, i) => (
+                  <span key={i} className="text-lg opacity-50 animate-pulse" style={{ animationDelay: `${i * 80}ms` }}>{flag}</span>
+                ))}
               </div>
             </div>
           </div>
         )}
 
-        {/* Compare Results */}
+        {/* Results */}
         {compareResult && !isComparing && selectedApp && (
           <div className="max-w-5xl mx-auto space-y-4">
-            {/* App Info Header */}
+            {/* App Info */}
             <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-4">
               {selectedApp.icon ? (
                 <img src={selectedApp.icon} alt={selectedApp.name} className="w-14 h-14 rounded-2xl flex-shrink-0" />
@@ -392,101 +356,94 @@ export default function Home() {
                 <p className="text-sm text-muted-foreground">{selectedApp.developer}</p>
                 <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                   <span className="text-xs text-muted-foreground">
-                    查詢到 {availableCountries.length} 個國家/地區的資料
+                    查詢 {totalCountries} 個國家 · 取得 {availableCountries.length} 個有資料
                   </span>
                   <span className="text-xs text-muted-foreground">
                     {compareResult.exchangeSource === "api" ? "✓ 即時匯率" : "⚠ 備用匯率"}
                   </span>
                   <Button
-                    variant="ghost"
-                    size="sm"
+                    variant="ghost" size="sm"
                     onClick={() => handleSelectApp(selectedApp)}
                     className="h-6 text-xs gap-1 text-muted-foreground hover:text-foreground px-2"
                   >
-                    <RefreshCw className="w-3 h-3" />
-                    重新查詢
+                    <RefreshCw className="w-3 h-3" />重新查詢
                   </Button>
                 </div>
               </div>
             </div>
 
-            {/* Stats Summary */}
-            {comparisonTable.length > 0 && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {(() => {
-                  const allPrices = comparisonTable.flatMap((item) =>
-                    Array.from(item.countryPrices.values()).map((p) => p.twd)
-                  );
-                  const minPrice = Math.min(...allPrices);
-                  const maxPrice = Math.max(...allPrices);
-                  const savings = maxPrice - minPrice;
-                  const savingsPct = maxPrice > 0 ? Math.round((savings / maxPrice) * 100) : 0;
-
-                  // 找最常出現的最便宜國家
-                  const cheapCountMap = new Map<string, number>();
-                  for (const item of comparisonTable) {
-                    for (const cc of item.cheapestCountries) {
-                      cheapCountMap.set(cc, (cheapCountMap.get(cc) || 0) + 1);
-                    }
-                  }
-                  const topCheap = Array.from(cheapCountMap.entries()).sort((a, b) => b[1] - a[1])[0];
-                  const topCheapCountry = topCheap
-                    ? compareResult.countries.find((c) => c.countryCode === topCheap[0])
-                    : null;
-
-                  return (
-                    <>
-                      <div className="bg-card border border-border rounded-lg p-3 text-center">
-                        <p className="text-xs text-muted-foreground">內購項目數</p>
-                        <p className="text-2xl font-bold text-foreground mt-1">{comparisonTable.length}</p>
-                      </div>
-                      <div className="bg-card border border-border rounded-lg p-3 text-center">
-                        <p className="text-xs text-muted-foreground">查詢國家數</p>
-                        <p className="text-2xl font-bold text-foreground mt-1">{availableCountries.length}</p>
-                      </div>
-                      <div className="bg-emerald-950/40 border border-emerald-800/40 rounded-lg p-3 text-center">
-                        <p className="text-xs text-emerald-400">最常最便宜</p>
-                        <p className="text-xl font-bold text-emerald-300 mt-1">
-                          {topCheapCountry ? `${topCheapCountry.flag} ${topCheapCountry.countryName}` : "—"}
-                        </p>
-                      </div>
-                      <div className="bg-blue-950/40 border border-blue-800/40 rounded-lg p-3 text-center">
-                        <p className="text-xs text-blue-400">最高可省</p>
-                        <p className="text-xl font-bold text-blue-300 mt-1">{savingsPct}%</p>
-                      </div>
-                    </>
-                  );
-                })()}
-              </div>
-            )}
+            {/* Stats */}
+            {comparisonTable.length > 0 && (() => {
+              const cheapCountMap = new Map<string, number>();
+              for (const item of comparisonTable) {
+                for (const cc of item.cheapestCountries) {
+                  cheapCountMap.set(cc, (cheapCountMap.get(cc) || 0) + 1);
+                }
+              }
+              const topCheap = Array.from(cheapCountMap.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3);
+              return (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="bg-card border border-border rounded-lg p-3 text-center">
+                    <p className="text-xs text-muted-foreground">內購項目</p>
+                    <p className="text-2xl font-bold text-foreground mt-1">{comparisonTable.length}</p>
+                  </div>
+                  <div className="bg-card border border-border rounded-lg p-3 text-center">
+                    <p className="text-xs text-muted-foreground">有資料國家</p>
+                    <p className="text-2xl font-bold text-foreground mt-1">{availableCountries.length}</p>
+                  </div>
+                  <div className="bg-emerald-950/40 border border-emerald-800/40 rounded-lg p-3 col-span-2">
+                    <p className="text-xs text-emerald-400 mb-1">最常最便宜的國家</p>
+                    <div className="flex flex-wrap gap-2">
+                      {topCheap.map(([cc, count]) => {
+                        const c = compareResult.countries.find((x) => x.countryCode === cc);
+                        return c ? (
+                          <span key={cc} className="text-sm text-emerald-300 font-medium">
+                            {c.flag} {c.countryName}
+                            <span className="text-xs text-emerald-500 ml-1">({count}項)</span>
+                          </span>
+                        ) : null;
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Comparison Table */}
             {comparisonTable.length > 0 ? (
               <div className="bg-card border border-border rounded-xl overflow-hidden">
-                <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-                  <TrendingDown className="w-4 h-4 text-primary" />
-                  <span className="text-sm font-medium text-foreground">各國內購價格比較</span>
-                  <span className="text-xs text-muted-foreground ml-auto">
-                    所有價格已換算為台幣 (TWD)
-                  </span>
+                <div className="px-4 py-3 border-b border-border">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <TrendingDown className="w-4 h-4 text-primary" />
+                      <span className="text-sm font-medium text-foreground">各國內購價格比較</span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs text-muted-foreground">所有價格換算為 TWD</span>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="divide-y divide-border">
                   {comparisonTable.map((item) => {
                     const isExpanded = expandedItems.has(item.key);
-                    const sortedPrices = Array.from(item.countryPrices.entries())
+                    const allPrices = Array.from(item.countryPrices.entries())
                       .map(([code, price]) => {
                         const country = compareResult.countries.find((c) => c.countryCode === code);
                         return { code, price, country };
                       })
                       .sort((a, b) => a.price.twd - b.price.twd);
 
-                    const cheapestTWD = sortedPrices[0]?.price.twd || 0;
-                    const mostExpensiveTWD = sortedPrices[sortedPrices.length - 1]?.price.twd || 0;
+                    // 依地區篩選
+                    const filteredPrices = selectedRegion === "全部"
+                      ? allPrices
+                      : allPrices.filter((p) => p.country?.region === selectedRegion);
+
+                    const cheapestTWD = allPrices[0]?.price.twd || 0;
+                    const mostExpensiveTWD = allPrices[allPrices.length - 1]?.price.twd || 0;
 
                     return (
                       <div key={item.key}>
-                        {/* Item Header */}
                         <button
                           onClick={() => toggleItem(item.key)}
                           className="w-full flex items-center gap-3 px-4 py-3 hover:bg-accent/30 transition-colors text-left"
@@ -494,72 +451,91 @@ export default function Home() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-sm font-medium text-foreground">{item.displayName}</span>
-                              <Badge
-                                className="text-xs bg-emerald-900/50 text-emerald-300 border-emerald-700/50 cheapest-badge"
-                              >
-                                最低 {item.minTWD.toLocaleString("zh-TW")} TWD
+                              <Badge className="text-xs bg-emerald-900/50 text-emerald-300 border-emerald-700/50">
+                                最低 NT${item.minTWD.toLocaleString("zh-TW")}
                               </Badge>
                               {mostExpensiveTWD > cheapestTWD && (
                                 <span className="text-xs text-muted-foreground">
-                                  最高可省{" "}
-                                  <span className="text-amber-400">
-                                    {Math.round(((mostExpensiveTWD - cheapestTWD) / mostExpensiveTWD) * 100)}%
-                                  </span>
+                                  最高可省 <span className="text-amber-400">{Math.round(((mostExpensiveTWD - cheapestTWD) / mostExpensiveTWD) * 100)}%</span>
                                 </span>
                               )}
                             </div>
                             <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                              {item.cheapestCountries.map((cc) => {
+                              {item.cheapestCountries.slice(0, 3).map((cc) => {
                                 const c = compareResult.countries.find((x) => x.countryCode === cc);
                                 return c ? (
-                                  <span key={cc} className="text-xs text-emerald-400">
-                                    {c.flag} {c.countryName}
-                                  </span>
+                                  <span key={cc} className="text-xs text-emerald-400">{c.flag} {c.countryName}</span>
                                 ) : null;
                               })}
+                              {item.cheapestCountries.length > 3 && (
+                                <span className="text-xs text-muted-foreground">+{item.cheapestCountries.length - 3} 個</span>
+                              )}
                               <span className="text-xs text-muted-foreground">最便宜</span>
                             </div>
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">
-                            <span className="text-xs text-muted-foreground">{sortedPrices.length} 國</span>
-                            {isExpanded ? (
-                              <ChevronUp className="w-4 h-4 text-muted-foreground" />
-                            ) : (
-                              <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                            )}
+                            <span className="text-xs text-muted-foreground">{allPrices.length} 國</span>
+                            {isExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
                           </div>
                         </button>
 
-                        {/* Expanded Price List */}
                         {isExpanded && (
                           <div className="bg-background/50 border-t border-border">
+                            {/* Region filter tabs */}
+                            <div className="px-4 pt-2 pb-1 flex gap-1 flex-wrap border-b border-border/50">
+                              <Filter className="w-3.5 h-3.5 text-muted-foreground self-center mr-1" />
+                              {REGIONS.map((r) => {
+                                const count = r === "全部"
+                                  ? allPrices.length
+                                  : allPrices.filter((p) => p.country?.region === r).length;
+                                if (count === 0 && r !== "全部") return null;
+                                return (
+                                  <button
+                                    key={r}
+                                    onClick={() => setSelectedRegion(r)}
+                                    className={`text-xs px-2 py-0.5 rounded transition-colors ${
+                                      selectedRegion === r
+                                        ? "bg-primary text-primary-foreground"
+                                        : "bg-muted text-muted-foreground hover:text-foreground"
+                                    }`}
+                                  >
+                                    {r} ({count})
+                                  </button>
+                                );
+                              })}
+                              <label className="ml-auto flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={showOnlyWithData}
+                                  onChange={(e) => setShowOnlyWithData(e.target.checked)}
+                                  className="w-3 h-3"
+                                />
+                                只顯示有資料
+                              </label>
+                            </div>
                             <div className="overflow-x-auto">
                               <table className="w-full text-sm">
                                 <thead>
                                   <tr className="border-b border-border">
                                     <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground w-8">#</th>
                                     <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">國家/地區</th>
+                                    <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">地區</th>
                                     <th className="text-right px-4 py-2 text-xs font-medium text-muted-foreground">原始價格</th>
                                     <th className="text-right px-4 py-2 text-xs font-medium text-muted-foreground">換算台幣</th>
                                     <th className="text-right px-4 py-2 text-xs font-medium text-muted-foreground">比最低貴</th>
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {sortedPrices.map(({ code, price, country }, idx) => {
+                                  {filteredPrices.map(({ code, price, country }, idx) => {
                                     const isCheapest = item.cheapestCountries.includes(code);
-                                    const diffPct =
-                                      cheapestTWD > 0
-                                        ? Math.round(((price.twd - cheapestTWD) / cheapestTWD) * 100)
-                                        : 0;
+                                    const diffPct = cheapestTWD > 0 ? Math.round(((price.twd - cheapestTWD) / cheapestTWD) * 100) : 0;
                                     return (
                                       <tr
                                         key={code}
-                                        className={`border-b border-border/50 last:border-0 ${
-                                          isCheapest ? "bg-emerald-950/20" : "hover:bg-accent/20"
-                                        }`}
+                                        className={`border-b border-border/50 last:border-0 ${isCheapest ? "bg-emerald-950/20" : "hover:bg-accent/20"}`}
                                       >
-                                        <td className="px-4 py-2.5 text-xs text-muted-foreground">{idx + 1}</td>
-                                        <td className="px-4 py-2.5">
+                                        <td className="px-4 py-2 text-xs text-muted-foreground">{idx + 1}</td>
+                                        <td className="px-4 py-2">
                                           <div className="flex items-center gap-2">
                                             <span className="text-base">{country?.flag}</span>
                                             <div>
@@ -567,24 +543,23 @@ export default function Home() {
                                                 {country?.countryName}
                                               </span>
                                               {isCheapest && (
-                                                <Badge className="ml-2 text-xs bg-emerald-900/60 text-emerald-300 border-emerald-700/50 py-0">
-                                                  最便宜
-                                                </Badge>
+                                                <Badge className="ml-2 text-xs bg-emerald-900/60 text-emerald-300 border-emerald-700/50 py-0">最便宜</Badge>
                                               )}
                                             </div>
                                           </div>
                                         </td>
-                                        <td className="px-4 py-2.5 text-right text-sm text-muted-foreground">
-                                          {price.formatted}
-                                        </td>
-                                        <td className={`px-4 py-2.5 text-right text-sm font-medium ${isCheapest ? "text-emerald-300" : "text-foreground"}`}>
+                                        <td className="px-4 py-2 text-xs text-muted-foreground">{country?.region}</td>
+                                        <td className="px-4 py-2 text-right text-sm text-muted-foreground">{price.formatted}</td>
+                                        <td className={`px-4 py-2 text-right text-sm font-medium ${isCheapest ? "text-emerald-300" : "text-foreground"}`}>
                                           NT${price.twd.toLocaleString("zh-TW")}
                                         </td>
-                                        <td className="px-4 py-2.5 text-right text-xs">
+                                        <td className="px-4 py-2 text-right text-xs">
                                           {isCheapest ? (
                                             <span className="text-emerald-400">—</span>
                                           ) : (
-                                            <span className="text-amber-400">+{diffPct}%</span>
+                                            <span className={diffPct > 100 ? "text-red-400" : diffPct > 50 ? "text-amber-400" : "text-muted-foreground"}>
+                                              +{diffPct}%
+                                            </span>
                                           )}
                                         </td>
                                       </tr>
@@ -600,25 +575,20 @@ export default function Home() {
                   })}
                 </div>
 
-                {/* Expand All / Collapse All */}
                 <div className="px-4 py-2.5 border-t border-border flex gap-2">
                   <Button
-                    variant="ghost"
-                    size="sm"
+                    variant="ghost" size="sm"
                     onClick={() => setExpandedItems(new Set(comparisonTable.map((i) => i.key)))}
                     className="text-xs text-muted-foreground gap-1"
                   >
-                    <ChevronDown className="w-3.5 h-3.5" />
-                    展開全部
+                    <ChevronDown className="w-3.5 h-3.5" />展開全部
                   </Button>
                   <Button
-                    variant="ghost"
-                    size="sm"
+                    variant="ghost" size="sm"
                     onClick={() => setExpandedItems(new Set())}
                     className="text-xs text-muted-foreground gap-1"
                   >
-                    <ChevronUp className="w-3.5 h-3.5" />
-                    收合全部
+                    <ChevronUp className="w-3.5 h-3.5" />收合全部
                   </Button>
                 </div>
               </div>
@@ -626,28 +596,31 @@ export default function Home() {
               <div className="bg-card border border-border rounded-xl p-8 text-center space-y-2">
                 <AlertCircle className="w-8 h-8 text-muted-foreground mx-auto" />
                 <p className="text-foreground font-medium">未找到內購項目</p>
-                <p className="text-sm text-muted-foreground">
-                  此遊戲可能沒有內購，或各國 App Store 頁面格式不同
-                </p>
+                <p className="text-sm text-muted-foreground">此遊戲可能沒有內購，或各國 App Store 頁面格式不同</p>
               </div>
             )}
 
-            {/* Countries with no data */}
+            {/* No data countries summary */}
             {compareResult.countries.filter((c) => c.items.length === 0).length > 0 && (
-              <div className="bg-card/50 border border-border/50 rounded-lg px-4 py-3">
-                <p className="text-xs text-muted-foreground">
-                  <span className="text-amber-400">⚠</span> 以下地區未取得資料（可能不支援或頁面格式不同）：{" "}
+              <details className="bg-card/50 border border-border/50 rounded-lg">
+                <summary className="px-4 py-2.5 text-xs text-muted-foreground cursor-pointer">
+                  <span className="text-amber-400">⚠</span> {compareResult.countries.filter((c) => c.items.length === 0).length} 個地區未取得資料（點擊展開）
+                </summary>
+                <div className="px-4 pb-3 flex flex-wrap gap-1.5">
                   {compareResult.countries
                     .filter((c) => c.items.length === 0)
-                    .map((c) => `${c.flag} ${c.countryName}`)
-                    .join("、")}
-                </p>
-              </div>
+                    .map((c) => (
+                      <span key={c.countryCode} className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                        {c.flag} {c.countryName}
+                      </span>
+                    ))}
+                </div>
+              </details>
             )}
           </div>
         )}
 
-        {/* Welcome State */}
+        {/* Welcome */}
         {!selectedApp && !isComparing && searchResults.length === 0 && (
           <div className="max-w-2xl mx-auto text-center py-12 space-y-6">
             <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
@@ -656,14 +629,14 @@ export default function Home() {
             <div className="space-y-2">
               <h2 className="text-xl font-bold text-foreground">找到最划算的購買地區</h2>
               <p className="text-muted-foreground text-sm leading-relaxed">
-                輸入遊戲名稱，自動比較台灣、日本、美國、香港、韓國等 15 個國家的 App Store 內購價格，
+                輸入遊戲名稱，自動比較全球 130+ 個國家/地區的 App Store 內購價格，
                 換算成台幣後告訴你哪個國家最便宜。
               </p>
             </div>
             <div className="grid grid-cols-3 gap-3 text-center">
               {[
                 { icon: "🔍", label: "搜尋遊戲", desc: "輸入名稱或 App ID" },
-                { icon: "🌍", label: "多國比價", desc: "15 個國家同時查詢" },
+                { icon: "🌍", label: "全球比價", desc: "130+ 個國家同時查詢" },
                 { icon: "💰", label: "台幣換算", desc: "即時匯率自動換算" },
               ].map((f) => (
                 <div key={f.label} className="bg-card border border-border rounded-lg p-3 space-y-1">
@@ -673,14 +646,16 @@ export default function Home() {
                 </div>
               ))}
             </div>
-            <div className="text-xs text-muted-foreground space-y-1">
-              <p>試試看：<button onClick={() => { setSearchTerm("絕區零"); }} className="text-primary hover:underline">絕區零</button>、<button onClick={() => { setSearchTerm("原神"); }} className="text-primary hover:underline">原神</button>、<button onClick={() => { setSearchTerm("Clash of Clans"); }} className="text-primary hover:underline">Clash of Clans</button></p>
+            <div className="text-xs text-muted-foreground">
+              試試看：
+              <button onClick={() => setSearchTerm("絕區零")} className="text-primary hover:underline mx-1">絕區零</button>、
+              <button onClick={() => setSearchTerm("原神")} className="text-primary hover:underline mx-1">原神</button>、
+              <button onClick={() => setSearchTerm("Clash of Clans")} className="text-primary hover:underline mx-1">Clash of Clans</button>
             </div>
           </div>
         )}
       </div>
 
-      {/* Footer */}
       <footer className="border-t border-border mt-12 py-4">
         <div className="container text-center text-xs text-muted-foreground">
           資料來源：Apple App Store 各國官方頁面 · 匯率來源：open.er-api.com · 僅供參考，實際價格以 App Store 為準

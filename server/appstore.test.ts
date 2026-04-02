@@ -10,16 +10,19 @@ describe("exchange rate conversion", () => {
     HKD: 4.17,
     KRW: 0.0237,
     CNY: 4.48,
+    TRY: 0.94,
+    ARS: 0.0325,
+    INR: 0.39,
+    EUR: 35.2,
+    GBP: 41.5,
   };
 
   it("converts JPY to TWD correctly", () => {
-    // 12000 JPY * 0.2178 = 2613.6 TWD
     const result = convertToTWD(12000, "JPY", mockRates);
     expect(result).toBeCloseTo(2613.6, 0);
   });
 
   it("converts USD to TWD correctly", () => {
-    // 9.99 USD * 32.5 = 324.675 TWD
     const result = convertToTWD(9.99, "USD", mockRates);
     expect(result).toBeCloseTo(324.675, 0);
   });
@@ -41,9 +44,23 @@ describe("exchange rate conversion", () => {
   });
 
   it("converts KRW to TWD correctly", () => {
-    // 10000 KRW * 0.0237 = 237 TWD
     const result = convertToTWD(10000, "KRW", mockRates);
     expect(result).toBeCloseTo(237, 0);
+  });
+
+  it("converts TRY to TWD correctly (Turkey)", () => {
+    const result = convertToTWD(1000, "TRY", mockRates);
+    expect(result).toBeCloseTo(940, 0);
+  });
+
+  it("converts ARS to TWD correctly (Argentina)", () => {
+    const result = convertToTWD(10000, "ARS", mockRates);
+    expect(result).toBeCloseTo(325, 0);
+  });
+
+  it("converts EUR to TWD correctly", () => {
+    const result = convertToTWD(9.99, "EUR", mockRates);
+    expect(result).toBeCloseTo(351.648, 0);
   });
 });
 
@@ -61,8 +78,42 @@ describe("SUPPORTED_COUNTRIES", () => {
     expect(jp?.currency).toBe("JPY");
   });
 
-  it("includes at least 10 countries", () => {
-    expect(SUPPORTED_COUNTRIES.length).toBeGreaterThanOrEqual(10);
+  it("includes at least 100 countries (全球覆蓋)", () => {
+    expect(SUPPORTED_COUNTRIES.length).toBeGreaterThanOrEqual(100);
+  });
+
+  it("includes Turkey (cheap region)", () => {
+    const tr = SUPPORTED_COUNTRIES.find((c) => c.code === "tr");
+    expect(tr).toBeDefined();
+    expect(tr?.currency).toBe("TRY");
+    expect(tr?.region).toBe("歐洲");
+  });
+
+  it("includes Argentina (cheap region)", () => {
+    const ar = SUPPORTED_COUNTRIES.find((c) => c.code === "ar");
+    expect(ar).toBeDefined();
+    expect(ar?.currency).toBe("ARS");
+    expect(ar?.region).toBe("美洲");
+  });
+
+  it("includes India", () => {
+    const ind = SUPPORTED_COUNTRIES.find((c) => c.code === "in");
+    expect(ind).toBeDefined();
+    expect(ind?.currency).toBe("INR");
+    expect(ind?.region).toBe("亞太");
+  });
+
+  it("includes South Africa", () => {
+    const za = SUPPORTED_COUNTRIES.find((c) => c.code === "za");
+    expect(za).toBeDefined();
+    expect(za?.currency).toBe("ZAR");
+    expect(za?.region).toBe("非洲");
+  });
+
+  it("includes Saudi Arabia", () => {
+    const sa = SUPPORTED_COUNTRIES.find((c) => c.code === "sa");
+    expect(sa).toBeDefined();
+    expect(sa?.region).toBe("中東");
   });
 
   it("all countries have required fields", () => {
@@ -72,7 +123,23 @@ describe("SUPPORTED_COUNTRIES", () => {
       expect(country.currency).toBeTruthy();
       expect(country.symbol).toBeTruthy();
       expect(country.flag).toBeTruthy();
+      expect(country.region).toBeTruthy();
     }
+  });
+
+  it("no duplicate country codes", () => {
+    const codes = SUPPORTED_COUNTRIES.map((c) => c.code);
+    const unique = new Set(codes);
+    expect(unique.size).toBe(codes.length);
+  });
+
+  it("covers all 5 regions", () => {
+    const regions = new Set(SUPPORTED_COUNTRIES.map((c) => c.region));
+    expect(regions.has("亞太")).toBe(true);
+    expect(regions.has("歐洲")).toBe(true);
+    expect(regions.has("美洲")).toBe(true);
+    expect(regions.has("中東")).toBe(true);
+    expect(regions.has("非洲")).toBe(true);
   });
 });
 
