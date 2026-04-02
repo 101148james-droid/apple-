@@ -226,19 +226,22 @@ export async function scrapeCountryIAP(appId: string, countryCode: string): Prom
 
     const items: IAPItem[] = [];
 
-    // 方法一：從 HTML 中的 text-pair 結構提取
-    $(".text-pair").each((_, el) => {
+    // 方法一：從 HTML 中的 text-pair 結構提取（支援 svelte class 格式）
+    // App Store 使用 <div class="text-pair svelte-xxx"><span>名稱</span> <span>價格</span></div>
+    $('[class*="text-pair"]').each((_, el) => {
       const spans = $(el).find("span");
       if (spans.length >= 2) {
         const name = $(spans[0]).text().trim();
         const priceText = $(spans[1]).text().trim();
-        if (name && priceText && priceText !== name) {
-          const parsed = parsePrice(priceText, country.currency);
+        if (name && priceText && priceText !== name && priceText.length > 0) {
+          // 偵測實際貨幣（有些國家用 USD 計價）
+          const detectedCurrency = detectCurrencyFromPrice(priceText, country.currency);
+          const parsed = parsePrice(priceText, detectedCurrency);
           if (parsed !== null) {
             items.push({
               name,
               price: parsed,
-              currency: country.currency,
+              currency: detectedCurrency,
               formattedPrice: priceText,
             });
           }
@@ -248,7 +251,7 @@ export async function scrapeCountryIAP(appId: string, countryCode: string): Prom
 
     // 方法二：從 JSON 資料中提取（備用）
     if (items.length === 0) {
-      const jsonMatch = html.match(/<script[^>]*type="application\/json"[^>]*>([\s\S]*?)<\/script>/);
+      const jsonMatch = html.match(/<script[^>]*id="serialized-server-data"[^>]*>([\s\S]*?)<\/script>/);
       if (jsonMatch) {
         try {
           const jsonData = JSON.parse(jsonMatch[1]);
@@ -266,18 +269,81 @@ export async function scrapeCountryIAP(appId: string, countryCode: string): Prom
   }
 }
 
+// 從價格文字偵測實際貨幣（有些國家的 App Store 用 USD 計價）
+function detectCurrencyFromPrice(priceText: string, defaultCurrency: string): string {
+  const text = priceText.trim();
+  // 匹配貨幣代碼前置（如 USD 4.99）
+  const currencyCodeMatch = text.match(/^([A-Z]{3})\s+[\d]/);
+  if (currencyCodeMatch) {
+    return currencyCodeMatch[1];
+  }
+  return defaultCurrency;
+}
+
 function parsePrice(priceText: string, currency: string): number | null {
-  // 移除貨幣符號、空格，保留數字、逗號、小數點
-  const cleaned = priceText
-    .replace(/[^\d.,]/g, "")
-    .replace(/,(?=\d{3}(?:[.,]|$))/g, "") // 移除千分位逗號
-    .replace(/,/g, "."); // 某些地區用逗號作小數點
+  const text = priceText.trim();
+
+  // 特殊格式：印尼 ribu（千）
+  const ribuMatch = text.match(/([\d.,]+)\s*ribu/i);
+  if (ribuMatch) {
+    const numStr = ribuMatch[1].replace(/[.,]/g, "");
+    const num = parseFloat(numStr) * 1000;
+    return isNaN(num) || num <= 0 ? null : Math.round(num);
+  }
+
+  // 移除所有非數字字元（保留 . 和 ,）
+  let cleaned = text.replace(/^[^\d]+/, ""); // 移除開頭非數字
+  cleaned = cleaned.replace(/[^\d.,]/g, ""); // 移除剩餘非數字
+
+  if (!cleaned) return null;
+
+  // 無小數點貨幣列表（提前宣告以便判斷千分位 vs 小數點）
+  const noDecimalCurrenciesCheck = ["JPY","KRW","IDR","VND","CLP","PYG","UGX","RWF","KHR","MMK","LAK","MNT","ISK","XAF","XOF","MGA","SLL","LBP","IQD","IRR","YER","DZD","UZS"];
+  const isNoDecimal = noDecimalCurrenciesCheck.includes(currency);
+
+  const dotCount = cleaned.split(".").length - 1;
+  const commaCount = cleaned.split(",").length - 1;
+
+  if (dotCount > 1) {
+    // 多個點：點是千分位，移除
+    cleaned = cleaned.replace(/\./g, "");
+  } else if (commaCount > 1) {
+    // 多個逧號：逧號是千分位，移除
+    cleaned = cleaned.replace(/,/g, "");
+  } else if (dotCount === 1 && commaCount === 1) {
+    const dotPos = cleaned.lastIndexOf(".");
+    const commaPos = cleaned.lastIndexOf(",");
+    if (dotPos > commaPos) {
+      // 點在後：逧號是千分位
+      cleaned = cleaned.replace(/,/g, "");
+    } else {
+      // 逧號在後：點是千分位，逧號是小數點
+      cleaned = cleaned.replace(/\./g, "").replace(",", ".");
+    }
+  } else if (dotCount === 1) {
+    const parts = cleaned.split(".");
+    if (parts[1] && parts[1].length === 3 && parts[0].length > 0 && isNoDecimal) {
+      // 無小數點貨幣（如 IDR）：.XXX 是千分位
+      cleaned = cleaned.replace(".", "");
+    }
+    // 對於有小數點的貨幣，保留原樣（點是小數點）
+  } else if (commaCount === 1) {
+    const parts = cleaned.split(",");
+    if (parts[1] && parts[1].length === 3 && parts[0].length > 0) {
+      // 千分位
+      cleaned = cleaned.replace(",", "");
+    } else {
+      // 小數點
+      cleaned = cleaned.replace(",", ".");
+    }
+  }
 
   const num = parseFloat(cleaned);
   if (isNaN(num) || num <= 0) return null;
 
   // 無小數點貨幣
-  if (["JPY", "KRW", "IDR", "VND", "CLP", "PYG", "UGX", "RWF", "KHR", "MMK", "LAK", "MNT", "ISK", "XAF", "XOF", "MGA", "SLL", "LBP", "IQD", "IRR", "YER", "DZD", "UZS"].includes(currency)) {
+  const noDecimalCurrencies = ["JPY", "KRW", "IDR", "VND", "CLP", "PYG", "UGX", "RWF", "KHR", "MMK", "LAK", "MNT", "ISK", "XAF", "XOF", "MGA", "SLL", "LBP", "IQD", "IRR", "YER", "DZD", "UZS"];
+  if (noDecimalCurrencies.includes(currency)) {
     return Math.round(num);
   }
   return num;

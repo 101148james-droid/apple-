@@ -148,3 +148,105 @@ describe("auth.logout", () => {
     expect(true).toBe(true);
   });
 });
+
+// 內建價格解析邏輯測試
+describe("price parsing logic", () => {
+  // 複製內部邏輯進行測試
+  function detectCurrencyFromPrice(priceText: string, defaultCurrency: string): string {
+    const text = priceText.trim();
+    const currencyCodeMatch = text.match(/^([A-Z]{3})\s+[\d]/);
+    if (currencyCodeMatch) return currencyCodeMatch[1];
+    return defaultCurrency;
+  }
+
+  function parsePrice(priceText: string, currency: string): number | null {
+    const text = priceText.trim();
+    const ribuMatch = text.match(/([\d.,]+)\s*ribu/i);
+    if (ribuMatch) {
+      const numStr = ribuMatch[1].replace(/[.,]/g, "");
+      const num = parseFloat(numStr) * 1000;
+      return isNaN(num) || num <= 0 ? null : Math.round(num);
+    }
+    let cleaned = text.replace(/^[^\d]+/, "");
+    cleaned = cleaned.replace(/[^\d.,]/g, "");
+    if (!cleaned) return null;
+    const noDecimal = ["JPY","KRW","IDR","VND","CLP","PYG","UGX","RWF","KHR","MMK","LAK","MNT","ISK","XAF","XOF","MGA","SLL","LBP","IQD","IRR","YER","DZD","UZS"];
+    const isNoDecimal = noDecimal.includes(currency);
+    const dotCount = cleaned.split(".").length - 1;
+    const commaCount = cleaned.split(",").length - 1;
+    if (dotCount > 1) {
+      cleaned = cleaned.replace(/\./g, "");
+    } else if (commaCount > 1) {
+      cleaned = cleaned.replace(/,/g, "");
+    } else if (dotCount === 1 && commaCount === 1) {
+      const dotPos = cleaned.lastIndexOf(".");
+      const commaPos = cleaned.lastIndexOf(",");
+      if (dotPos > commaPos) cleaned = cleaned.replace(/,/g, "");
+      else cleaned = cleaned.replace(/\./g, "").replace(",", ".");
+    } else if (dotCount === 1) {
+      const parts = cleaned.split(".");
+      if (parts[1] && parts[1].length === 3 && parts[0].length > 0 && isNoDecimal) {
+        cleaned = cleaned.replace(".", ""); // 無小數點貨幣：.XXX 是千分位
+      }
+    } else if (commaCount === 1) {
+      const parts = cleaned.split(",");
+      if (parts[1] && parts[1].length === 3 && parts[0].length > 0) cleaned = cleaned.replace(",", "");
+      else cleaned = cleaned.replace(",", ".");
+    }
+    const num = parseFloat(cleaned);
+    if (isNaN(num) || num <= 0) return null;
+    if (isNoDecimal) return Math.round(num);
+    return num;
+  }
+
+  it("應正確解析 TWD 格式", () => {
+    expect(parsePrice("$330.00", "TWD")).toBe(330);
+    expect(parsePrice("$3,290.00", "TWD")).toBe(3290);
+    expect(parsePrice("NT$330", "TWD")).toBe(330);
+  });
+
+  it("應正確解析 JPY 格式", () => {
+    expect(parsePrice("¥ 1,200", "JPY")).toBe(1200);
+    expect(parsePrice("¥12,000", "JPY")).toBe(12000);
+  });
+
+  it("應正確解析 IDR ribu 格式", () => {
+    expect(parsePrice("Rp 81ribu", "IDR")).toBe(81000);
+    expect(parsePrice("Rp 162ribu", "IDR")).toBe(162000);
+  });
+
+  it("應正確解析 IDR 點分隔格式（Rp 16.500）", () => {
+    expect(parsePrice("Rp 16.500", "IDR")).toBe(16500);
+  });
+
+  it("應正確解析 INR 格式", () => {
+    expect(parsePrice("₹ 499", "INR")).toBe(499);
+    expect(parsePrice("₹ 99", "INR")).toBe(99);
+  });
+
+  it("應正確解析 BRL 格式（R$ 24,90）", () => {
+    expect(parsePrice("R$ 24,90", "BRL")).toBe(24.9);
+  });
+
+  it("應正確解析 TRY 格式（₺79,99）", () => {
+    expect(parsePrice("₺79,99", "TRY")).toBe(79.99);
+    expect(parsePrice("TRY 79,99", "TRY")).toBe(79.99);
+  });
+
+  it("應正確偵測 USD 計價國家（緬甸/斯里蘭卡）", () => {
+    expect(detectCurrencyFromPrice("USD 4.99", "MMK")).toBe("USD");
+    expect(detectCurrencyFromPrice("USD 9.99", "LKR")).toBe("USD");
+    expect(detectCurrencyFromPrice("USD 4.99", "KHR")).toBe("USD");
+  });
+
+  it("應在無法偵測時回傳預設貨幣", () => {
+    expect(detectCurrencyFromPrice("₹ 499", "INR")).toBe("INR");
+    expect(detectCurrencyFromPrice("$330.00", "TWD")).toBe("TWD");
+  });
+
+  it("應對無效價格回傳 null", () => {
+    expect(parsePrice("", "TWD")).toBeNull();
+    expect(parsePrice("免費", "TWD")).toBeNull();
+    expect(parsePrice("Free", "TWD")).toBeNull();
+  });
+});

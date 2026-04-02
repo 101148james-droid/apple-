@@ -33,3 +33,7 @@
 
 ## Bug 修復（2026-04-03）
 - [x] 修復查詢結果後出現的 React DOM insertBefore 錯誤（NotFoundError）
+
+## Bug 修復（2026-04-03 第二批）
+- [x] 修復特殊格式價格解析失敗（Rp 85ribu、USD 4.99 等）導致換算台幣為 NT$0（加入 detectCurrencyFromPrice + 改進 parsePrice）
+- [x] 修復爬蟲只抓到少數國家資料（CSS selector 改為 [class*="text-pair"]，支援 svelte hash class）
