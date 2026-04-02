@@ -152,10 +152,28 @@ describe("auth.logout", () => {
 // 內建價格解析邏輯測試
 describe("price parsing logic", () => {
   // 複製內部邏輯進行測試
+  const SYMBOL_TO_CURRENCY_TEST: Record<string, string> = {
+    "$": "USD", "€": "EUR", "£": "GBP", "¥": "JPY",
+    "₩": "KRW", "₹": "INR", "₺": "TRY", "₽": "RUB",
+    "₴": "UAH", "฿": "THB", "៛": "KHR", "₮": "MNT",
+  };
+
   function detectCurrencyFromPrice(priceText: string, defaultCurrency: string): string {
     const text = priceText.trim();
-    const currencyCodeMatch = text.match(/^([A-Z]{3})\s+[\d]/);
-    if (currencyCodeMatch) return currencyCodeMatch[1];
+    // 1. 前置貨幣代碼（USD 4.99）
+    const prefixCodeMatch = text.match(/^([A-Z]{3})\s+[\d]/);
+    if (prefixCodeMatch) return prefixCodeMatch[1];
+    // 2. 後置貨幣代碼（0,49 USD）
+    const suffixCodeMatch = text.match(/[\d][\d.,]*\s+([A-Z]{3})$/);
+    if (suffixCodeMatch) return suffixCodeMatch[1];
+    // 3. 後置貨幣符號（0,39 €）
+    const suffixSymbolMatch = text.match(/[\d][\d.,]*\s*([^\d.,\s]+)$/);
+    if (suffixSymbolMatch) {
+      const sym = suffixSymbolMatch[1].trim();
+      if (SYMBOL_TO_CURRENCY_TEST[sym]) return SYMBOL_TO_CURRENCY_TEST[sym];
+    }
+    // 4. 前置 $ 且國家不是 USD
+    if (text.startsWith("$") && defaultCurrency !== "USD") return "USD";
     return defaultCurrency;
   }
 
@@ -233,15 +251,35 @@ describe("price parsing logic", () => {
     expect(parsePrice("TRY 79,99", "TRY")).toBe(79.99);
   });
 
-  it("應正確偵測 USD 計價國家（緬甸/斯里蘭卡）", () => {
+  it("應正確偵測前置 USD 代碼（緬甸/斯里蘭卡）", () => {
     expect(detectCurrencyFromPrice("USD 4.99", "MMK")).toBe("USD");
     expect(detectCurrencyFromPrice("USD 9.99", "LKR")).toBe("USD");
     expect(detectCurrencyFromPrice("USD 4.99", "KHR")).toBe("USD");
   });
 
+  it("應正確偵測後置 USD 代碼（0,49 USD）", () => {
+    expect(detectCurrencyFromPrice("0,49 USD", "UAH")).toBe("USD");
+    expect(detectCurrencyFromPrice("0.39 USD", "BDT")).toBe("USD");
+    expect(detectCurrencyFromPrice("4,99 USD", "RSD")).toBe("USD");
+  });
+
+  it("應正確偵測後置 EUR 符號（0,39 €）", () => {
+    expect(detectCurrencyFromPrice("0,39 €", "RSD")).toBe("EUR");
+    expect(detectCurrencyFromPrice("4,99€", "ALL")).toBe("EUR");
+  });
+
+  it("應正確偵測 $ 符號在非 USD 國家（孟加拉/黎巴嫩/伊拉克）", () => {
+    expect(detectCurrencyFromPrice("$0.39", "BDT")).toBe("USD");
+    expect(detectCurrencyFromPrice("$0.39", "LBP")).toBe("USD");
+    expect(detectCurrencyFromPrice("$0.39", "IQD")).toBe("USD");
+    expect(detectCurrencyFromPrice("$0.39", "IRR")).toBe("USD");
+    expect(detectCurrencyFromPrice("$0.39", "ETB")).toBe("USD");
+  });
+
   it("應在無法偵測時回傳預設貨幣", () => {
     expect(detectCurrencyFromPrice("₹ 499", "INR")).toBe("INR");
-    expect(detectCurrencyFromPrice("$330.00", "TWD")).toBe("TWD");
+    expect(detectCurrencyFromPrice("$330.00", "TWD")).toBe("USD"); // TWD 不是 USD，$ 視為 USD
+    expect(detectCurrencyFromPrice("$330.00", "USD")).toBe("USD"); // USD 國家保留
   });
 
   it("應對無效價格回傳 null", () => {

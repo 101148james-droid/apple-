@@ -270,13 +270,43 @@ export async function scrapeCountryIAP(appId: string, countryCode: string): Prom
 }
 
 // 從價格文字偵測實際貨幣（有些國家的 App Store 用 USD 計價）
+// 常見貨幣符號對應表
+const SYMBOL_TO_CURRENCY: Record<string, string> = {
+  "$": "USD",   // 美元符號（預設，如果國家本身就是 USD 則保留）
+  "€": "EUR",   "\u00a3": "GBP",   "¥": "JPY",
+  "₩": "KRW",   "₹": "INR",   "₺": "TRY",
+  "₽": "RUB",   "₴": "UAH",   "₸": "KZT",
+  "₼": "AZN",   "₾": "GEL",   "₯": "GRD",
+  "₦": "NGN",   "₨": "PKR",   "₱": "PHP",
+  "₫": "VND",   "₪": "ILS",   "₧": "ESP",
+  "฿": "THB",   "៛": "KHR",   "₮": "MNT",
+  "₭": "LAK",   "₲": "PYG",   "₳": "ARS",
+  "₵": "GHS",   "₶": "LVL",   "₷": "PHP",
+};
+
 function detectCurrencyFromPrice(priceText: string, defaultCurrency: string): string {
   const text = priceText.trim();
-  // 匹配貨幣代碼前置（如 USD 4.99）
-  const currencyCodeMatch = text.match(/^([A-Z]{3})\s+[\d]/);
-  if (currencyCodeMatch) {
-    return currencyCodeMatch[1];
+
+  // 1. 前置貨幣代碼（如 USD 4.99）
+  const prefixCodeMatch = text.match(/^([A-Z]{3})\s+[\d]/);
+  if (prefixCodeMatch) return prefixCodeMatch[1];
+
+  // 2. 後置貨幣代碼（如 0,49 USD 或 0.39 USD）
+  const suffixCodeMatch = text.match(/[\d][\d.,]*\s+([A-Z]{3})$/);
+  if (suffixCodeMatch) return suffixCodeMatch[1];
+
+  // 3. 後置貨幣符號（如 0,39 € 或 0.49£）
+  const suffixSymbolMatch = text.match(/[\d][\d.,]*\s*([^\d.,\s]+)$/);
+  if (suffixSymbolMatch) {
+    const sym = suffixSymbolMatch[1].trim();
+    if (SYMBOL_TO_CURRENCY[sym]) return SYMBOL_TO_CURRENCY[sym];
   }
+
+  // 4. 前置美元符號 $：如果國家本身不是 USD，則視為 USD 計價
+  if (text.startsWith("$") && defaultCurrency !== "USD") {
+    return "USD";
+  }
+
   return defaultCurrency;
 }
 
