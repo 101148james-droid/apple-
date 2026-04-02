@@ -1,0 +1,9 @@
+{
+  "query": "CREATE TABLE `search_history` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`appId` varchar(32) NOT NULL,\n\t`appName` varchar(256) NOT NULL,\n\t`appIcon` text,\n\t`developer` varchar(256),\n\t`sessionId` varchar(64),\n\t`userId` int,\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\tCONSTRAINT `search_history_id` PRIMARY KEY(`id`)\n);",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user RfoT1X7CSbDBbgx.root --database hcbmZprGt7EJWrMd5jwsTo --execute CREATE TABLE `search_history` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`appId` varchar(32) NOT NULL,\n\t`appName` varchar(256) NOT NULL,\n\t`appIcon` text,\n\t`developer` varchar(256),\n\t`sessionId` varchar(64),\n\t`userId` int,\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\tCONSTRAINT `search_history_id` PRIMARY KEY(`id`)\n);",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1759
+}
