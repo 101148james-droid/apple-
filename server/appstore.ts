@@ -234,7 +234,7 @@ export async function scrapeCountryIAP(appId: string, countryCode: string): Prom
         const name = $(spans[0]).text().trim();
         const priceText = $(spans[1]).text().trim();
         if (name && priceText && priceText !== name && priceText.length > 0) {
-          // 偵測實際貨幣（有些國家用 USD 計價）
+          // 以 country.currency 為主，只有字串中明確包含不同貨幣代碼時才覆蓋
           const detectedCurrency = detectCurrencyFromPrice(priceText, country.currency);
           const parsed = parsePrice(priceText, detectedCurrency);
           if (parsed !== null) {
@@ -269,10 +269,9 @@ export async function scrapeCountryIAP(appId: string, countryCode: string): Prom
   }
 }
 
-// 從價格文字偵測實際貨幣（有些國家的 App Store 用 USD 計價）
 // 常見貨幣符號對應表
 const SYMBOL_TO_CURRENCY: Record<string, string> = {
-  "$": "USD",   // 美元符號（預設，如果國家本身就是 USD 則保留）
+  "$": "USD",   // 美元符號（僅在明確後置且與 defaultCurrency 不同時使用）
   "€": "EUR",   "\u00a3": "GBP",   "¥": "JPY",
   "₩": "KRW",   "₹": "INR",   "₺": "TRY",
   "₽": "RUB",   "₴": "UAH",   "₸": "KZT",
@@ -300,46 +299,64 @@ const NON_STANDARD_CURRENCY_CODES: Record<string, string> = {
   "ARS$": "ARS",
 };
 
-function detectCurrencyFromPrice(priceText: string, defaultCurrency: string): string {
+/**
+ * 從價格文字偵測實際貨幣。
+ *
+ * 核心原則：以 defaultCurrency（即 country.currency）為主。
+ * 只有當價格字串中「明確包含不同的貨幣代碼」（如 USD 4.99、0,49 USD、$US 4.99）時，
+ * 才覆蓋為偵測到的貨幣。
+ *
+ * 不再依賴 $ 符號推斷 USD：
+ * - 台灣 $3,290.00 → TWD（不是 USD）
+ * - 阿根廷 $1,999 → ARS（不是 USD）
+ * - 緬甸/斯里蘭卡 USD 4.99 → USD（字串明確寫了 USD）
+ */
+export function detectCurrencyFromPrice(priceText: string, defaultCurrency: string): string {
   // 先將 NBSP (\xa0) 和其他不可見空白替換成普通空格
   const text = priceText.replace(/[\u00a0\u202f\u2009\u2007\u2008]/g, " ").trim();
 
-  // 1. 前置非標準代碼（如 $US 4.99、US$ 4.99）
+  // 1. 前置非標準代碼（如 $US 4.99、US$ 4.99、HK$ 4.99）
+  //    只有偵測到的貨幣與 defaultCurrency 不同時才覆蓋
   for (const [code, currency] of Object.entries(NON_STANDARD_CURRENCY_CODES)) {
     const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (new RegExp(`^${escaped}\\s*[\\d]`).test(text)) return currency;
+    if (new RegExp(`^${escaped}\\s*[\\d]`).test(text)) {
+      if (currency !== defaultCurrency) return currency;
+    }
   }
 
-  // 2. 前置標準貨幣代碼（如 USD 4.99）
+  // 2. 前置標準貨幣代碼（如 USD 4.99、EUR 9.99）
+  //    只有偵測到的貨幣與 defaultCurrency 不同時才覆蓋
   const prefixCodeMatch = text.match(/^([A-Z]{3})\s+[\d]/);
-  if (prefixCodeMatch) return prefixCodeMatch[1];
+  if (prefixCodeMatch && prefixCodeMatch[1] !== defaultCurrency) return prefixCodeMatch[1];
 
   // 3. 後置非標準代碼（如 1,99 $US、5,99 $US）
   for (const [code, currency] of Object.entries(NON_STANDARD_CURRENCY_CODES)) {
     const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (new RegExp(`[\\d]\\s*${escaped}$`).test(text)) return currency;
+    if (new RegExp(`[\\d]\\s*${escaped}$`).test(text)) {
+      if (currency !== defaultCurrency) return currency;
+    }
   }
 
   // 4. 後置標準貨幣代碼（如 0,49 USD 或 0.39 USD）
   const suffixCodeMatch = text.match(/[\d][\d.,]*\s+([A-Z]{3})$/);
-  if (suffixCodeMatch) return suffixCodeMatch[1];
+  if (suffixCodeMatch && suffixCodeMatch[1] !== defaultCurrency) return suffixCodeMatch[1];
 
   // 5. 後置貨幣符號（如 0,39 € 或 0.49£）
+  //    只有符號對應的貨幣與 defaultCurrency 不同時才覆蓋
   const suffixSymbolMatch = text.match(/[\d][\d.,]*\s*([^\d.,\s]+)$/);
   if (suffixSymbolMatch) {
     const sym = suffixSymbolMatch[1].trim();
-    if (SYMBOL_TO_CURRENCY[sym]) return SYMBOL_TO_CURRENCY[sym];
+    if (SYMBOL_TO_CURRENCY[sym] && SYMBOL_TO_CURRENCY[sym] !== defaultCurrency) {
+      return SYMBOL_TO_CURRENCY[sym];
+    }
   }
 
-  // 6. 前置美元符號 $：如果國家本身不是 USD，則視為 USD 計價
-  if (text.startsWith("$") && defaultCurrency !== "USD") {
-    return "USD";
-  }
-
+  // 注意：不再用前置 $ 符號推斷 USD。
+  // 台灣 $3,290.00 → TWD，阿根廷 $1,999 → ARS，緬甸 USD 4.99 → USD（已在步驟2處理）
   return defaultCurrency;
 }
 
-function parsePrice(priceText: string, currency: string): number | null {
+export function parsePrice(priceText: string, currency: string): number | null {
   // 將 NBSP (\xa0) 和其他不可見空白替換成普通空格
   const text = priceText.replace(/[\u00a0\u202f\u2009\u2007\u2008]/g, " ").trim();
 
@@ -368,16 +385,16 @@ function parsePrice(priceText: string, currency: string): number | null {
     // 多個點：點是千分位，移除
     cleaned = cleaned.replace(/\./g, "");
   } else if (commaCount > 1) {
-    // 多個逧號：逧號是千分位，移除
+    // 多個逗號：逗號是千分位，移除
     cleaned = cleaned.replace(/,/g, "");
   } else if (dotCount === 1 && commaCount === 1) {
     const dotPos = cleaned.lastIndexOf(".");
     const commaPos = cleaned.lastIndexOf(",");
     if (dotPos > commaPos) {
-      // 點在後：逧號是千分位
+      // 點在後：逗號是千分位
       cleaned = cleaned.replace(/,/g, "");
     } else {
-      // 逧號在後：點是千分位，逧號是小數點
+      // 逗號在後：點是千分位，逗號是小數點
       cleaned = cleaned.replace(/\./g, "").replace(",", ".");
     }
   } else if (dotCount === 1) {

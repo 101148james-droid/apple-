@@ -53,3 +53,13 @@
 - [x] 修復靜默失敗：搜尋/查詢失敗時顯示明確錯誤訊息（searchError + compareError state）
 - [x] 加入完整 Loading 狀態（搜尋中轉圈、查詢中進度）
 - [x] 確認匯率 API 在部署伺服器可穩定取得資料（備用靜態匯率）
+
+## Bug 修復（第六批）
+- [x] 研究根本原因：Apple App Store 網頁無 JSON 數字欄位，字串解析是唯一可行方式
+- [x] 修復換算爆表：detectCurrencyFromPrice 改以 country.currency 為主，不再用 $ 符號推斷 USD
+  - 台灣 $3,290.00 → TWD（不再誤判為 USD × 32 = NT$105,280）
+  - 阿根廷 $1,999 → ARS（不再誤判為 USD）
+  - 緬甸 USD 4.99 → USD（字串明確寫了 USD，仍正確偵測）
+- [x] 匯出 detectCurrencyFromPrice 和 parsePrice 供測試直接引用
+- [x] 更新單元測試（43 個全部通過）：新增台灣/阿根廷 $ 符號保持原貨幣的測試案例
+- [x] TypeScript 0 errors
