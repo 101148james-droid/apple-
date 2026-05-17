@@ -102,3 +102,9 @@
   - $19.99 在阿爾及利亞 → NT$650（不再是 NT$5）
 - [x] 升級後端爬蟲 Headers：Windows Chrome 124 User-Agent + 完整瀏覽器 Headers
 - [x] 45 個測試全部通過，TypeScript 0 errors
+
+## Bug 修復（第十批）
+- [x] 顯示真實錯誤訊息：移除包裝邏輯，直接顯示 HTTP 狀態碼 + body 內容 + console.error
+- [x] 確認後端架構：所有請求都走後端 tRPC，不走前端直接 fetch
+- [x] 加入 cors 套件，後端 Express 設定 CORS headers（origin: true, credentials: true）
+- [x] 45 個測試全部通過，TypeScript 0 errors

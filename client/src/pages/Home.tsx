@@ -459,21 +459,10 @@ export default function Home() {
         setCompareResult(result as CompareResult);
         if (showHistory) historyQuery.refetch();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "未知錯誤";
-        const isTimeout = msg.includes("超時") || msg.includes("timeout") || msg.includes("TIMEOUT");
-        const isNetwork = msg.includes("network") || msg.includes("fetch") || msg.includes("ECONNREFUSED");
-        const isServiceUnavailable = msg.includes("Service Unavailable") || msg.includes("服務暫時不可用") || msg.includes("503") || msg.includes("502") || err instanceof SyntaxError || (err instanceof Error && err.name === "SyntaxError");
-        let friendlyMsg: string;
-        if (isTimeout) {
-          friendlyMsg = "查詢超時（查詢 130+ 國家需要較長時間），請再按一次「重新查詢」。";
-        } else if (isServiceUnavailable) {
-          friendlyMsg = "伺服器暫時不可用，請稍候 30 秒後再試。";
-        } else if (isNetwork) {
-          friendlyMsg = "網路連線失敗，請檢查網路狀態後再試。";
-        } else {
-          friendlyMsg = `查詢失敗：${msg}。請稍後再試。`;
-        }
-        setCompareError(friendlyMsg);
+        // 直接顯示真實錯誤，方便除錯
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[compareIAP Error]", err);
+        setCompareError(`查詢失敗：${msg}`);
         toast.error("比價失敗，請稍後再試");
       } finally {
         setIsComparing(false);

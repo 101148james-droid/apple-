@@ -47,12 +47,19 @@ const trpcClient = trpc.createClient({
           ...(init ?? {}),
           credentials: "include",
         });
-        // 若伺服器回傳非 JSON 回應（如 503 Service Unavailable HTML），
-        // 直接拋出友善錯誤，避免 tRPC 嘗試 JSON.parse 而崩潰
+        // 若伺服器回傳非 JSON 回應（如 503/504 HTML），直接拋出真實錯誤
         if (!response.ok) {
           const contentType = response.headers.get("content-type") ?? "";
           if (!contentType.includes("application/json")) {
-            throw new Error(`服務暫時不可用（HTTP ${response.status}），請稍後再試。`);
+            let bodySnippet = "";
+            try {
+              const text = await response.clone().text();
+              // 取前 300 字元顯示真實錯誤內容
+              bodySnippet = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+            } catch { /* ignore */ }
+            const errMsg = `HTTP ${response.status} ${response.statusText}${bodySnippet ? " — " + bodySnippet : ""}`;
+            console.error("[tRPC Fetch Error]", errMsg, "URL:", input);
+            throw new Error(errMsg);
           }
         }
         return response;
