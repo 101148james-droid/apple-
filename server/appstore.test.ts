@@ -283,4 +283,14 @@ describe("price parsing logic", () => {
     expect(detectCurrencyFromPrice("A$4.99", "AUD")).toBe("AUD");
     expect(detectCurrencyFromPrice("A$4.99", "USD")).toBe("AUD");
   });
+
+  it("阿爾及利亞/摩洛哥/突尼西亞/薩摩亞 $4.99 應為 USD（已修正幣別為 USD）", () => {
+    // 這些國家的 SUPPORTED_COUNTRIES.currency 已改為 USD
+    // detectCurrencyFromPrice("$4.99", "USD") 應回傳 USD，不再誤算為 DZD/MAD/TND/WST
+    expect(detectCurrencyFromPrice("$4.99", "USD")).toBe("USD");   // dz: 阿爾及利亞
+    expect(detectCurrencyFromPrice("$19.99", "USD")).toBe("USD");  // dz: $19.99 不再誤算為 DZD
+    expect(detectCurrencyFromPrice("$4.99", "USD")).toBe("USD");   // ma: 摩洛哥
+    expect(detectCurrencyFromPrice("$4.99", "USD")).toBe("USD");   // tn: 突尼西亞
+    expect(detectCurrencyFromPrice("$4.99", "USD")).toBe("USD");   // ws: 薩摩亞
+  });
 });

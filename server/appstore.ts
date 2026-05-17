@@ -49,7 +49,7 @@ export const SUPPORTED_COUNTRIES = [
   { code: "la", name: "寮國", currency: "USD", symbol: "$", flag: "🇱🇦", region: "亞太" },
   { code: "pw", name: "帛琉", currency: "USD", symbol: "$", flag: "🇵🇼", region: "亞太" },
   { code: "fm", name: "密克羅尼西亞", currency: "USD", symbol: "$", flag: "🇫🇲", region: "亞太" },
-  { code: "ws", name: "薩摩亞", currency: "WST", symbol: "T", flag: "🇼🇸", region: "亞太" },
+  { code: "ws", name: "薩摩亞", currency: "USD", symbol: "$", flag: "🇼🇸", region: "亞太" },  // Apple Store 實際用 USD 計價
   { code: "vu", name: "萬那杜", currency: "VUV", symbol: "Vt", flag: "🇻🇺", region: "亞太" },
   { code: "sb", name: "所羅門群島", currency: "SBD", symbol: "SI$", flag: "🇸🇧", region: "亞太" },
   { code: "to", name: "東加", currency: "TOP", symbol: "T$", flag: "🇹🇴", region: "亞太" },
@@ -156,9 +156,9 @@ export const SUPPORTED_COUNTRIES = [
   { code: "cm", name: "喀麥隆", currency: "XAF", symbol: "FCFA", flag: "🇨🇲", region: "非洲" },
   { code: "ci", name: "象牙海岸", currency: "XOF", symbol: "CFA", flag: "🇨🇮", region: "非洲" },
   { code: "sn", name: "塞內加爾", currency: "XOF", symbol: "CFA", flag: "🇸🇳", region: "非洲" },
-  { code: "ma", name: "摩洛哥", currency: "MAD", symbol: "MAD", flag: "🇲🇦", region: "非洲" },
-  { code: "dz", name: "阿爾及利亞", currency: "DZD", symbol: "دج", flag: "🇩🇿", region: "非洲" },
-  { code: "tn", name: "突尼西亞", currency: "TND", symbol: "DT", flag: "🇹🇳", region: "非洲" },
+  { code: "ma", name: "摩洛哥", currency: "USD", symbol: "$", flag: "🇲🇦", region: "非洲" },  // Apple Store 實際用 USD 計價
+  { code: "dz", name: "阿爾及利亞", currency: "USD", symbol: "$", flag: "🇩🇿", region: "非洲" },  // Apple Store 實際用 USD 計價
+  { code: "tn", name: "突尼西亞", currency: "USD", symbol: "$", flag: "🇹🇳", region: "非洲" },  // Apple Store 實際用 USD 計價
   { code: "ao", name: "安哥拉", currency: "AOA", symbol: "Kz", flag: "🇦🇴", region: "非洲" },
   { code: "mz", name: "莫三比克", currency: "MZN", symbol: "MT", flag: "🇲🇿", region: "非洲" },
   { code: "zm", name: "尚比亞", currency: "ZMW", symbol: "ZK", flag: "🇿🇲", region: "非洲" },
@@ -230,10 +230,16 @@ export async function scrapeCountryIAP(appId: string, countryCode: string): Prom
   try {
     const response = await axios.get(url, {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
-        Accept: "text/html,application/xhtml+xml",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Upgrade-Insecure-Requests": "1",
       },
       timeout: 8000,
       decompress: true,

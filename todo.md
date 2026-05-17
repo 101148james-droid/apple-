@@ -96,3 +96,9 @@
 - [x] 改善前端錯誤訊息：SyntaxError/503/502 顯示「伺服器暫時不可用，請稍候 30 秒後再試」
 - [x] 移除 debug log（scrapeCountryIAP 的 OK/EMPTY 記錄）
 - [x] 44 個測試全部通過，TypeScript 0 errors
+
+## Bug 修復（第九批）
+- [x] 修復幣別判斷：把阿爾及利亞(dz)、摩洛哥(ma)、突尼西亞(tn)、薩摩亞(ws) 的 currency 改為 USD
+  - $19.99 在阿爾及利亞 → NT$650（不再是 NT$5）
+- [x] 升級後端爬蟲 Headers：Windows Chrome 124 User-Agent + 完整瀏覽器 Headers
+- [x] 45 個測試全部通過，TypeScript 0 errors
