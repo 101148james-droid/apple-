@@ -89,3 +89,10 @@
   - 台灣有上架時強制顯示台灣中文名稱
 - [x] 強化 API 錯誤防護：axios validateStatus 防止非 2xx 拋出異常
 - [x] 44 個單元測試全部通過，TypeScript 0 errors
+
+## Bug 修復（第八批）
+- [x] 修復 503 Service Unavailable 導致 JSON 解析崩潰：在 tRPC fetch 包裝中加入 response.ok 檢查
+  - 當伺服器回傳非 JSON 回應（如 503 HTML），直接拋出友善錯誤，避免 tRPC 嘗試 JSON.parse 而崩潰
+- [x] 改善前端錯誤訊息：SyntaxError/503/502 顯示「伺服器暫時不可用，請稍候 30 秒後再試」
+- [x] 移除 debug log（scrapeCountryIAP 的 OK/EMPTY 記錄）
+- [x] 44 個測試全部通過，TypeScript 0 errors

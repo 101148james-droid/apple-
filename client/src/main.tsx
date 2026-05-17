@@ -42,11 +42,20 @@ const trpcClient = trpc.createClient({
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
-      fetch(input, init) {
-        return globalThis.fetch(input, {
+      async fetch(input, init) {
+        const response = await globalThis.fetch(input, {
           ...(init ?? {}),
           credentials: "include",
         });
+        // 若伺服器回傳非 JSON 回應（如 503 Service Unavailable HTML），
+        // 直接拋出友善錯誤，避免 tRPC 嘗試 JSON.parse 而崩潰
+        if (!response.ok) {
+          const contentType = response.headers.get("content-type") ?? "";
+          if (!contentType.includes("application/json")) {
+            throw new Error(`服務暫時不可用（HTTP ${response.status}），請稍後再試。`);
+          }
+        }
+        return response;
       },
     }),
   ],
