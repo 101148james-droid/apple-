@@ -27,9 +27,12 @@ export const appRouter = router({
   appstore: router({
     // 搜尋遊戲
     search: publicProcedure
-      .input(z.object({ term: z.string().min(1).max(100) }))
+      .input(z.object({
+        term: z.string().min(1).max(100),
+        country: z.string().length(2).optional().default("tw"),
+      }))
       .query(async ({ input }) => {
-        const results = await searchApps(input.term, "tw");
+        const results = await searchApps(input.term, input.country);
         return results;
       }),
 

@@ -3,6 +3,13 @@ import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import {
   Search,
@@ -180,6 +187,22 @@ function buildComparisonTable(countries: CountryResult[]): ComparisonRow[] {
     })
     .sort((a, b) => a.minTWD - b.minTWD);
 }
+
+// 搜尋起點國家選單（主流遇戲大國）
+const SEARCH_COUNTRIES = [
+  { code: "tw", name: "🇹🇼 台灣" },
+  { code: "us", name: "🇺🇸 美國" },
+  { code: "jp", name: "🇯🇵 日本" },
+  { code: "kr", name: "🇰🇷 韓國" },
+  { code: "hk", name: "🇭🇰 香港" },
+  { code: "cn", name: "🇨🇳 中國" },
+  { code: "sg", name: "🇸🇬 新加坡" },
+  { code: "gb", name: "🇬🇧 英國" },
+  { code: "de", name: "🇩🇪 德國" },
+  { code: "au", name: "🇦🇺 澳洲" },
+  { code: "ca", name: "🇨🇦 加拿大" },
+  { code: "fr", name: "🇫🇷 法國" },
+] as const;
 
 const REGIONS = ["全部", "亞太", "歐洲", "美洲", "中東", "非洲"] as const;
 type Region = (typeof REGIONS)[number];
@@ -402,12 +425,12 @@ export default function Home() {
   const [isComparing, setIsComparing] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [compareError, setCompareError] = useState<string | null>(null);
-  const [showHistory, setShowHistory] = useState(false);
+    const [showHistory, setShowHistory] = useState(false);
   const [selectedRegion, setSelectedRegion] = useState<Region>("全部");
   const [showOnlyWithData, setShowOnlyWithData] = useState(true);
+  const [searchCountry, setSearchCountry] = useState("tw"); // 搜尋起點國家
   const searchInputRef = useRef<HTMLInputElement>(null);
-
-  const searchQuery = trpc.appstore.search.useQuery({ term: searchTerm }, { enabled: false });
+  const searchQuery = trpc.appstore.search.useQuery({ term: searchTerm, country: searchCountry }, { enabled: false });
   const compareMutation = trpc.appstore.compareIAP.useMutation();
   const historyQuery = trpc.history.list.useQuery(undefined, { enabled: showHistory });
   const deleteHistoryMutation = trpc.history.delete.useMutation({
@@ -538,6 +561,24 @@ export default function Home() {
       <div className="container py-6 space-y-6">
         {/* Search bar */}
         <div className="max-w-2xl mx-auto space-y-3">
+          {/* 搜尋起點國家切換 */}
+          <div className="flex items-center gap-2 text-sm">
+            <Globe className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+            <span className="text-muted-foreground flex-shrink-0">搜尋地區：</span>
+            <Select value={searchCountry} onValueChange={(v) => { setSearchCountry(v); setSearchResults([]); }}>
+              <SelectTrigger className="h-7 w-auto min-w-[120px] text-xs bg-card border-border">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SEARCH_COUNTRIES.map((c) => (
+                  <SelectItem key={c.code} value={c.code} className="text-xs">
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-xs text-muted-foreground">— 切換可搜尋日本、美區等地區獨家遇戲</span>
+          </div>
           <div className="flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -546,7 +587,7 @@ export default function Home() {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                placeholder="輸入遊戲名稱（如：絕區零、原神）或 App ID"
+                placeholder="輸入遇戲名稱（如：絕區零、原神）或 App ID"
                 className="pl-9 bg-card border-border text-foreground placeholder:text-muted-foreground"
               />
             </div>

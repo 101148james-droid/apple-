@@ -108,3 +108,11 @@
 - [x] 確認後端架構：所有請求都走後端 tRPC，不走前端直接 fetch
 - [x] 加入 cors 套件，後端 Express 設定 CORS headers（origin: true, credentials: true）
 - [x] 45 個測試全部通過，TypeScript 0 errors
+
+## 重構（第十一批）
+- [x] 新增搜尋起點國家切換下拉選單（12 個主流遇戲大國）
+- [x] 後端 search procedure 加入 country 參數（預設 tw）
+- [x] 縮小 BATCH_SIZE 到 12，加入批次間 200ms 延遲
+- [x] 幣別修正完整（USD 國家清單已包含 dz/ma/tn/ws 等）
+- [x] 分組優化已完成（tw=0, hk=1, 其他中文=2, 英文=3）
+- [x] 45 個測試全部通過，TypeScript 0 errors

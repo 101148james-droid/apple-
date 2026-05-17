@@ -494,11 +494,14 @@ export async function scrapeAllCountriesIAP(appId: string, countryCodes?: string
     ? SUPPORTED_COUNTRIES.filter((c) => countryCodes.includes(c.code))
     : [...SUPPORTED_COUNTRIES];
 
-  // 分批處理，每批 30 個，避免同時發出太多請求
-  const BATCH_SIZE = 30;
+  // 分批處理，每批 12 個，避免觸發 Apple Rate Limit
+  const BATCH_SIZE = 12;
+  const BATCH_DELAY_MS = 200; // 批次間延遲（ms）
   const allResults: CountryIAPResult[] = [];
 
   for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+    // 批次間延遲（第一批不延遲）
+    if (i > 0) await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
     const batch = targets.slice(i, i + BATCH_SIZE);
     const batchResults = await Promise.allSettled(
       batch.map(async (country) => {
