@@ -533,13 +533,13 @@ export default function Home() {
   }, [comparisonTable]);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen text-foreground" style={{ background: 'linear-gradient(135deg, #0B1120 0%, #111827 100%)' }}>
       {/* Header */}
-      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+      <header className="border-b border-white/10 sticky top-0 z-50" style={{ background: 'rgba(11,17,32,0.8)', backdropFilter: 'blur(12px)' }}>
         <div className="container py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-              <ShoppingBag className="w-4 h-4 text-primary" />
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(245,158,11,0.2)' }}>
+              <ShoppingBag className="w-4 h-4" style={{ color: '#F59E0B' }} />
             </div>
             <div>
               <h1 className="text-sm font-bold text-foreground leading-none">App Store 比價工具</h1>
@@ -559,6 +559,23 @@ export default function Home() {
       </header>
 
       <div className="container py-6 space-y-6">
+        {/* Brand Badge */}
+        <div className="max-w-2xl mx-auto flex justify-center">
+          <div className="brand-badge flex items-center gap-3 px-4 py-2.5 rounded-full">
+            <img
+              src="/manus-storage/tx-logo_bf853e23.png"
+              alt="Tx手遊代儲"
+              className="flex-shrink-0 object-cover"
+              style={{ width: 36, height: 36, borderRadius: '50%' }}
+            />
+            <div className="text-xs leading-relaxed" style={{ color: 'rgba(226,232,240,0.85)' }}>
+              <span className="font-medium" style={{ color: '#FCD34D' }}>開發者：Tx手遊代儲</span>
+              <span className="mx-1.5 opacity-40">|</span>
+              <span>有問題聯繫 v：eason101148</span>
+            </div>
+          </div>
+        </div>
+
         {/* Search bar */}
         <div className="max-w-2xl mx-auto space-y-3">
           {/* 搜尋起點國家切換 */}
@@ -595,6 +612,7 @@ export default function Home() {
               onClick={handleSearch}
               disabled={isSearching || !searchTerm.trim()}
               className="gap-2 min-w-[80px]"
+              style={{ background: '#F59E0B', color: '#0B1120', border: 'none', fontWeight: 600 }}
             >
               {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
               搜尋
@@ -935,12 +953,18 @@ export default function Home() {
                 { icon: "🌍", label: "全球比價", desc: "130+ 個國家同時查詢" },
                 { icon: "💰", label: "台幣換算", desc: "即時匯率自動換算" },
               ].map((f) => (
-                <div key={`feature-${f.label}`} className="bg-card border border-border rounded-lg p-3 space-y-1">
+                <div key={`feature-${f.label}`} className="glass-card rounded-xl p-4 space-y-1.5">
                   <div className="text-2xl">{f.icon}</div>
                   <p className="text-sm font-medium text-foreground">{f.label}</p>
                   <p className="text-xs text-muted-foreground">{f.desc}</p>
                 </div>
               ))}
+            </div>
+            {/* 跨區查詢提示 */}
+            <div className="rounded-lg px-4 py-3 text-left" style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.25)' }}>
+              <p className="text-xs leading-relaxed" style={{ color: 'rgba(147,197,253,0.9)' }}>
+                💡 <span className="font-medium">溫馨提示：</span>本工具僅能查詢遊戲在各國 App Store「有正式上架」的內購價格。若該遊戲未在某國商店上架（即使支援外幣結帳），將無法取得該區的比價資料。
+              </p>
             </div>
             <div className="text-xs text-muted-foreground">
               試試看：

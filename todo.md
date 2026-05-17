@@ -116,3 +116,11 @@
 - [x] 幣別修正完整（USD 國家清單已包含 dz/ma/tn/ws 等）
 - [x] 分組優化已完成（tw=0, hk=1, 其他中文=2, 英文=3）
 - [x] 45 個測試全部通過，TypeScript 0 errors
+
+## UI 升級（第十二批）
+- [x] 上傳 Logo 圖片到 CDN，設定 Storage Proxy
+- [x] 全面更新 index.css：深夜藍漸層背景、暖橘色點綴色、毛玻璃卡片效果
+- [x] 加入品牌徽章（Logo + 開發者聯絡資訊）
+- [x] 加入跨區查詢提示框（功能卡片下方）
+- [x] 按鈕改為暖橘色（#F59E0B）
+- [x] 45 個測試全部通過，TypeScript 0 errors
