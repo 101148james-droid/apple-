@@ -294,3 +294,46 @@ describe("price parsing logic", () => {
     expect(detectCurrencyFromPrice("$4.99", "USD")).toBe("USD");   // ws: 薩摩亞
   });
 });
+
+// Bug 4 修復測試：逗號小數點格式（法語/非洲地區）
+describe("Bug 4: 逗號小數點清洗（1,99 $US → 1.99）", () => {
+  it("喀麥隆 1,99 $US 應解析為 1.99 USD（不是 NT$0）", () => {
+    // 喀麥隆 (cm) 的 App Store 顯示 "1,99\xa0$US"，逗號是小數點（法語格式）
+    const currency = detectCurrencyFromPrice("1,99\u00a0$US", "XAF");
+    expect(currency).toBe("USD");
+    const price = parsePrice("1,99\u00a0$US", "USD");
+    expect(price).toBeCloseTo(1.99, 2);
+  });
+
+  it("5,99 $US 應解析為 5.99 USD", () => {
+    const currency = detectCurrencyFromPrice("5,99\u00a0$US", "XAF");
+    expect(currency).toBe("USD");
+    const price = parsePrice("5,99\u00a0$US", "USD");
+    expect(price).toBeCloseTo(5.99, 2);
+  });
+
+  it("99,99 $US 應解析為 99.99 USD", () => {
+    const price = parsePrice("99,99\u00a0$US", "USD");
+    expect(price).toBeCloseTo(99.99, 2);
+  });
+
+  it("BRL R$ 24,90 應解析為 24.90（逗號是小數點）", () => {
+    const price = parsePrice("R$ 24,90", "BRL");
+    expect(price).toBeCloseTo(24.9, 2);
+  });
+
+  it("EUR 0,99 應解析為 0.99（逗號是小數點）", () => {
+    const price = parsePrice("0,99", "EUR");
+    expect(price).toBeCloseTo(0.99, 2);
+  });
+
+  it("JPY 1,200 應解析為 1200（逗號是千分位）", () => {
+    const price = parsePrice("¥1,200", "JPY");
+    expect(price).toBe(1200);
+  });
+
+  it("IDR 1.234 應解析為 1234（點是千分位）", () => {
+    const price = parsePrice("Rp 1.234", "IDR");
+    expect(price).toBe(1234);
+  });
+});

@@ -6,6 +6,7 @@ import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
+import { registerCompareStreamRoute } from "../compareStream";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -45,6 +46,8 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   // Storage proxy for /manus-storage/* paths
   registerStorageProxy(app);
+  // SSE 串流比價 API（漸進式渲染）
+  registerCompareStreamRoute(app);
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
   // tRPC API

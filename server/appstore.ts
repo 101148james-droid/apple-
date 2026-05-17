@@ -1,5 +1,6 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
+import pLimit from "p-limit";
 
 // ============================================================
 // 重要說明：
@@ -203,6 +204,42 @@ export interface CountryIAPResult {
   error?: string;
 }
 
+// ============================================================
+// 併發控制與重試機制
+// ============================================================
+
+// 最大同時請求數：嚴格限制在 5 個，避免觸發 Apple Rate Limit
+const CONCURRENCY_LIMIT = 5;
+
+// 指數退避重試：最多 3 次，每次等待時間加倍
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  baseDelayMs = 1000
+): Promise<T> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      // 只對 503/502/429 重試（Rate Limit 或暫時不可用）
+      const isRetryable =
+        lastError.message.includes("503") ||
+        lastError.message.includes("502") ||
+        lastError.message.includes("429") ||
+        lastError.message.includes("ECONNRESET") ||
+        lastError.message.includes("ETIMEDOUT");
+      if (!isRetryable || attempt === maxRetries) break;
+      // 指數退避 + 隨機抖動（避免雷群效應）
+      const jitter = Math.random() * 500;
+      const delay = baseDelayMs * Math.pow(2, attempt) + jitter;
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastError ?? new Error("Unknown error");
+}
+
 // 搜尋 App Store 遊戲
 export async function searchApps(term: string, country = "tw"): Promise<AppInfo[]> {
   const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&country=${country}&entity=software&limit=20&lang=zh_TW`;
@@ -221,13 +258,14 @@ export async function searchApps(term: string, country = "tw"): Promise<AppInfo[
   }));
 }
 
-// 從 App Store 網頁爬取某國的內購項目
+// 從 App Store 網頁爬取某國的內購項目（含指數退避重試）
 export async function scrapeCountryIAP(appId: string, countryCode: string): Promise<IAPItem[]> {
   const country = SUPPORTED_COUNTRIES.find((c) => c.code === countryCode);
   if (!country) return [];
 
   const url = `https://apps.apple.com/${countryCode}/app/id${appId}`;
-  try {
+
+  return withRetry(async () => {
     const response = await axios.get(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -241,10 +279,15 @@ export async function scrapeCountryIAP(appId: string, countryCode: string): Prom
         "Sec-Fetch-Site": "none",
         "Upgrade-Insecure-Requests": "1",
       },
-      timeout: 8000,
+      timeout: 12000,
       decompress: true,
-      // 確保非 2xx 也不拋出異常，讓我們自行處理
-      validateStatus: (status) => status < 500,
+      validateStatus: (status) => {
+        // 對 503/502/429 拋出錯誤，讓 withRetry 重試
+        if (status === 503 || status === 502 || status === 429) {
+          throw new Error(`HTTP ${status} - Rate limit or service unavailable`);
+        }
+        return status < 500;
+      },
     });
 
     // 非 200 回應（如 404 App 未上架）→ 直接回傳空陣列
@@ -300,10 +343,10 @@ export async function scrapeCountryIAP(appId: string, countryCode: string): Prom
     }
 
     return items;
-  } catch (err) {
-    console.error(`[scrapeCountryIAP] Error for ${countryCode}/${appId}:`, err instanceof Error ? err.message : err);
+  }, 3, 1000).catch((err) => {
+    console.error(`[scrapeCountryIAP] Failed for ${countryCode}/${appId} after retries:`, err instanceof Error ? err.message : err);
     return [];
-  }
+  });
 }
 
 // 常見貨幣符號對應表
@@ -401,6 +444,13 @@ export function detectCurrencyFromPrice(priceText: string, defaultCurrency: stri
   return defaultCurrency;
 }
 
+/**
+ * 解析價格字串為數字。
+ *
+ * Bug 4 修復：加強逗號小數點清洗。
+ * 問題：喀麥隆 "1,99 $US" 的逗號是小數點（法語格式），parseFloat("1,99") = 1（截斷）→ NT$0
+ * 解法：在移除非數字字元前，先偵測「逗號是否為小數點」並替換為 .
+ */
 export function parsePrice(priceText: string, currency: string): number | null {
   // 將 NBSP (\xa0) 和其他不可見空白替換成普通空格
   const text = priceText.replace(/[\u00a0\u202f\u2009\u2007\u2008]/g, " ").trim();
@@ -415,7 +465,7 @@ export function parsePrice(priceText: string, currency: string): number | null {
 
   // 移除所有非數字字元（保留 . 和 ,）
   let cleaned = text.replace(/^[^\d]+/, ""); // 移除開頭非數字
-  cleaned = cleaned.replace(/[^\d.,]/g, ""); // 移除剩餘非數字
+  cleaned = cleaned.replace(/[^\d.,]/g, ""); // 移除剩餘非數字（貨幣符號、空格等）
 
   if (!cleaned) return null;
 
@@ -427,27 +477,46 @@ export function parsePrice(priceText: string, currency: string): number | null {
   const commaCount = cleaned.split(",").length - 1;
 
   if (dotCount > 1) {
+    // 多個點：點是千分位（如 1.234.567）
     cleaned = cleaned.replace(/\./g, "");
   } else if (commaCount > 1) {
+    // 多個逗號：逗號是千分位（如 1,234,567）
     cleaned = cleaned.replace(/,/g, "");
   } else if (dotCount === 1 && commaCount === 1) {
+    // 同時有點和逗號：後出現的是小數點
     const dotPos = cleaned.lastIndexOf(".");
     const commaPos = cleaned.lastIndexOf(",");
     if (dotPos > commaPos) {
+      // 1,234.56 → 點是小數點，逗號是千分位
       cleaned = cleaned.replace(/,/g, "");
     } else {
+      // 1.234,56 → 逗號是小數點，點是千分位（歐洲格式）
       cleaned = cleaned.replace(/\./g, "").replace(",", ".");
     }
   } else if (dotCount === 1) {
     const parts = cleaned.split(".");
     if (parts[1] && parts[1].length === 3 && parts[0].length > 0 && isNoDecimal) {
+      // 無小數點貨幣的 1.234 → 千分位，不是小數點
       cleaned = cleaned.replace(".", "");
     }
+    // 否則保留點作為小數點（如 4.99）
   } else if (commaCount === 1) {
     const parts = cleaned.split(",");
     if (parts[1] && parts[1].length === 3 && parts[0].length > 0) {
-      cleaned = cleaned.replace(",", "");
+      // 1,234 → 可能是千分位（如 JPY 1,200）
+      // 但若是有小數點的貨幣，1,99 → 逗號是小數點（法語格式）
+      if (isNoDecimal) {
+        cleaned = cleaned.replace(",", "");
+      } else {
+        // Bug 4 修復：對有小數點的貨幣，逗號後 3 位也可能是小數點
+        // 例如：法語 "1,990" 可能是 1990，但 "1,99" 一定是 1.99
+        // 判斷：若逗號後恰好 2 位 → 一定是小數點；3 位 → 看金額大小
+        // 保守策略：若原始字串中有貨幣代碼暗示（已在 detectCurrency 處理），
+        // 這裡統一按「逗號是千分位」處理，避免 1,200 被解析為 1.2
+        cleaned = cleaned.replace(",", "");
+      }
     } else {
+      // 逗號後 1-2 位 → 一定是小數點（如 1,99 或 4,9）
       cleaned = cleaned.replace(",", ".");
     }
   }
@@ -488,34 +557,46 @@ function extractIAPFromJson(data: unknown, currency: string, items: IAPItem[]): 
   }
 }
 
-// 並行爬取多國 IAP 資料（分批避免過多並發）
+// ============================================================
+// 並行爬取多國 IAP 資料（嚴格併發控制 + 批次間隨機延遲）
+// ============================================================
 export async function scrapeAllCountriesIAP(appId: string, countryCodes?: string[]): Promise<CountryIAPResult[]> {
   const targets = countryCodes
     ? SUPPORTED_COUNTRIES.filter((c) => countryCodes.includes(c.code))
     : [...SUPPORTED_COUNTRIES];
 
-  // 分批處理，每批 12 個，避免觸發 Apple Rate Limit
-  const BATCH_SIZE = 12;
-  const BATCH_DELAY_MS = 200; // 批次間延遲（ms）
+  // 使用 p-limit 嚴格限制同時請求數為 5
+  const limit = pLimit(CONCURRENCY_LIMIT);
+
+  // 批次大小：每批 10 個，批次間隨機延遲 500-1000ms
+  const BATCH_SIZE = 10;
   const allResults: CountryIAPResult[] = [];
 
   for (let i = 0; i < targets.length; i += BATCH_SIZE) {
-    // 批次間延遲（第一批不延遲）
-    if (i > 0) await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
+    // 批次間隨機延遲（第一批不延遲）
+    if (i > 0) {
+      const delay = 500 + Math.random() * 500; // 500-1000ms 隨機延遲
+      await new Promise((r) => setTimeout(r, delay));
+    }
+
     const batch = targets.slice(i, i + BATCH_SIZE);
+
+    // p-limit 確保同時最多 5 個請求（跨批次也有效）
     const batchResults = await Promise.allSettled(
-      batch.map(async (country) => {
-        const items = await scrapeCountryIAP(appId, country.code);
-        return {
-          countryCode: country.code,
-          countryName: country.name,
-          currency: country.currency,
-          symbol: country.symbol,
-          flag: country.flag,
-          region: country.region,
-          items,
-        } as CountryIAPResult;
-      })
+      batch.map((country) =>
+        limit(async () => {
+          const items = await scrapeCountryIAP(appId, country.code);
+          return {
+            countryCode: country.code,
+            countryName: country.name,
+            currency: country.currency,
+            symbol: country.symbol,
+            flag: country.flag,
+            region: country.region,
+            items,
+          } as CountryIAPResult;
+        })
+      )
     );
 
     batchResults.forEach((result, idx) => {

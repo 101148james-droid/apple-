@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,11 +58,15 @@ interface CountryResult {
   error?: string;
 }
 
-interface CompareResult {
-  appId: string;
-  countries: CountryResult[];
+interface StreamMeta {
   exchangeSource: string;
   ratesUpdatedAt: number;
+  appId: string;
+}
+
+interface CompareProgress {
+  completed: number;
+  total: number;
 }
 
 interface ComparisonRow {
@@ -88,9 +92,6 @@ function normalizeIAPName(name: string): string {
  * 3. 過濾掉 1-2 位的短數字（可能是序號，如 Bundle12 中的 12）
  *    但若名稱中只有短數字，仍回傳（避免全部退回名稱比對）
  * 4. 若無數字 → 回傳 null，退回名稱比對
- *
- * 注意：Bundle12 和 Bundle22 中的 12/22 都是短數字，
- * 若過濾後無顯著數字，回傳 null，讓它們用名稱比對（不強行合併）。
  */
 function extractNumericKey(name: string): string | null {
   const cleaned = name.replace(/[,，.]/g, "");
@@ -188,7 +189,7 @@ function buildComparisonTable(countries: CountryResult[]): ComparisonRow[] {
     .sort((a, b) => a.minTWD - b.minTWD);
 }
 
-// 搜尋起點國家選單（主流遇戲大國）
+// 搜尋起點國家選單（主流遊戲大國）
 const SEARCH_COUNTRIES = [
   { code: "tw", name: "🇹🇼 台灣" },
   { code: "us", name: "🇺🇸 美國" },
@@ -414,24 +415,50 @@ function PriceTableRow({ item, countries, selectedRegion, showOnlyWithData, onRe
   );
 }
 
+// ─── 進度條元件 ────────────────────────────────────────────────────────────────
+
+function ProgressBar({ progress }: { progress: CompareProgress }) {
+  const pct = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
+  return (
+    <div className="space-y-1.5">
+      <div className="flex justify-between text-xs text-muted-foreground">
+        <span>已查詢 {progress.completed} / {progress.total} 個國家</span>
+        <span>{pct}%</span>
+      </div>
+      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+        <div
+          className="h-full rounded-full transition-all duration-300"
+          style={{ width: `${pct}%`, background: '#F59E0B' }}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Home() {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState<AppInfo[]>([]);
   const [selectedApp, setSelectedApp] = useState<AppInfo | null>(null);
-  const [compareResult, setCompareResult] = useState<CompareResult | null>(null);
+
+  // SSE 漸進式渲染狀態
+  const [streamCountries, setStreamCountries] = useState<CountryResult[]>([]);
+  const [streamProgress, setStreamProgress] = useState<CompareProgress | null>(null);
+  const [streamMeta, setStreamMeta] = useState<StreamMeta | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamDone, setStreamDone] = useState(false);
+  const eventSourceRef = useRef<EventSource | null>(null);
+
   const [isSearching, setIsSearching] = useState(false);
-  const [isComparing, setIsComparing] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [compareError, setCompareError] = useState<string | null>(null);
-    const [showHistory, setShowHistory] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [selectedRegion, setSelectedRegion] = useState<Region>("全部");
   const [showOnlyWithData, setShowOnlyWithData] = useState(true);
   const [searchCountry, setSearchCountry] = useState("tw"); // 搜尋起點國家
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchQuery = trpc.appstore.search.useQuery({ term: searchTerm, country: searchCountry }, { enabled: false });
-  const compareMutation = trpc.appstore.compareIAP.useMutation();
   const historyQuery = trpc.history.list.useQuery(undefined, { enabled: showHistory });
   const deleteHistoryMutation = trpc.history.delete.useMutation({
     onSuccess: () => historyQuery.refetch(),
@@ -440,20 +467,37 @@ export default function Home() {
     onSuccess: () => historyQuery.refetch(),
   });
 
+  // 取消 SSE 連線
+  const cancelStream = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+  }, []);
+
+  // 清理 SSE 連線（元件卸載時）
+  useEffect(() => {
+    return () => cancelStream();
+  }, [cancelStream]);
+
   const handleSearch = useCallback(async () => {
     if (!searchTerm.trim()) return;
     setIsSearching(true);
     setSearchResults([]);
     setSelectedApp(null);
-    setCompareResult(null);
+    setStreamCountries([]);
+    setStreamProgress(null);
+    setStreamMeta(null);
+    setStreamDone(false);
     setSearchError(null);
     setCompareError(null);
+    cancelStream();
     try {
       const result = await searchQuery.refetch();
       if (result.data) {
         setSearchResults(result.data as AppInfo[]);
         if (result.data.length === 0) {
-          setSearchError("找不到相關遇戲，請嘗試其他關鍵字");
+          setSearchError("找不到相關遊戲，請嘗試其他關鍵字");
         }
       }
     } catch (err) {
@@ -463,39 +507,75 @@ export default function Home() {
     } finally {
       setIsSearching(false);
     }
-  }, [searchTerm, searchQuery]);
+  }, [searchTerm, searchQuery, cancelStream]);
 
+  // Bug 2 修復：使用 SSE 漸進式渲染
   const handleSelectApp = useCallback(
-    async (app: AppInfo) => {
+    (app: AppInfo) => {
       setSelectedApp(app);
       setSearchResults([]);
-      setCompareResult(null);
+      setStreamCountries([]);
+      setStreamProgress(null);
+      setStreamMeta(null);
+      setStreamDone(false);
       setCompareError(null);
-      setIsComparing(true);
-      try {
-        const result = await compareMutation.mutateAsync({
-          appId: app.id,
-          appName: app.name,
-          appIcon: app.icon,
-          developer: app.developer,
-        });
-        setCompareResult(result as CompareResult);
-        if (showHistory) historyQuery.refetch();
-      } catch (err) {
-        // 直接顯示真實錯誤，方便除錯
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error("[compareIAP Error]", err);
-        setCompareError(`查詢失敗：${msg}`);
-        toast.error("比價失敗，請稍後再試");
-      } finally {
-        setIsComparing(false);
-      }
+      setIsStreaming(true);
+      cancelStream();
+
+      // 建立 SSE 連線
+      const params = new URLSearchParams({
+        appId: app.id,
+        appName: app.name,
+        appIcon: app.icon,
+        developer: app.developer,
+      });
+      const url = `/api/compare-stream?${params.toString()}`;
+      const es = new EventSource(url);
+      eventSourceRef.current = es;
+
+      // 收到國家資料：立即加入渲染
+      es.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+
+          if (msg.type === "progress" && msg.progress) {
+            setStreamProgress(msg.progress);
+            if (msg.meta) setStreamMeta(msg.meta);
+          } else if (msg.type === "country" && msg.data) {
+            setStreamCountries((prev) => [...prev, msg.data]);
+            if (msg.progress) setStreamProgress(msg.progress);
+          } else if (msg.type === "done") {
+            setStreamDone(true);
+            setIsStreaming(false);
+            es.close();
+            eventSourceRef.current = null;
+            if (msg.meta) setStreamMeta(msg.meta);
+            if (showHistory) historyQuery.refetch();
+          } else if (msg.type === "error") {
+            setCompareError(`查詢失敗：${msg.message ?? "未知錯誤"}`);
+            setIsStreaming(false);
+            es.close();
+            eventSourceRef.current = null;
+          }
+        } catch {
+          // ignore parse errors
+        }
+      };
+
+      es.onerror = () => {
+        if (!streamDone) {
+          setCompareError("連線中斷，請稍後重試");
+          setIsStreaming(false);
+        }
+        es.close();
+        eventSourceRef.current = null;
+      };
     },
-    [compareMutation, showHistory, historyQuery]
+    [cancelStream, showHistory, historyQuery, streamDone]
   );
 
   const handleHistoryClick = useCallback(
-    async (appId: string, appName: string, appIcon?: string | null, developer?: string | null) => {
+    (appId: string, appName: string, appIcon?: string | null, developer?: string | null) => {
       const app: AppInfo = {
         id: appId,
         name: appName,
@@ -505,19 +585,20 @@ export default function Home() {
         url: "",
       };
       setSearchTerm(appName);
-      await handleSelectApp(app);
+      handleSelectApp(app);
     },
     [handleSelectApp]
   );
 
+  // 即時計算比價表格（每次收到新國家資料就重算）
   const comparisonTable = useMemo(
-    () => (compareResult ? buildComparisonTable(compareResult.countries) : []),
-    [compareResult]
+    () => buildComparisonTable(streamCountries),
+    [streamCountries]
   );
 
   const availableCountries = useMemo(
-    () => (compareResult ? compareResult.countries.filter((c) => c.items.length > 0) : []),
-    [compareResult]
+    () => streamCountries.filter((c) => c.items.length > 0),
+    [streamCountries]
   );
 
   const topCheapCountries = useMemo(() => {
@@ -531,6 +612,10 @@ export default function Home() {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3);
   }, [comparisonTable]);
+
+  // 是否有任何結果可顯示
+  const hasResults = streamCountries.length > 0;
+  const isComparing = isStreaming;
 
   return (
     <div className="min-h-screen text-foreground" style={{ background: 'linear-gradient(135deg, #0B1120 0%, #111827 100%)' }}>
@@ -594,7 +679,7 @@ export default function Home() {
                 ))}
               </SelectContent>
             </Select>
-            <span className="text-xs text-muted-foreground">— 切換可搜尋日本、美區等地區獨家遇戲</span>
+            <span className="text-xs text-muted-foreground">— 切換可搜尋日本、美區等地區獨家遊戲</span>
           </div>
           <div className="flex gap-2">
             <div className="relative flex-1">
@@ -604,7 +689,7 @@ export default function Home() {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                placeholder="輸入遇戲名稱（如：絕區零、原神）或 App ID"
+                placeholder="輸入遊戲名稱（如：絕區零、原神）或 App ID"
                 className="pl-9 bg-card border-border text-foreground placeholder:text-muted-foreground"
               />
             </div>
@@ -737,7 +822,7 @@ export default function Home() {
         )}
 
         {/* Compare error */}
-        {compareError && !isComparing && selectedApp && !compareResult && (
+        {compareError && !isComparing && selectedApp && !hasResults && (
           <div className="max-w-4xl mx-auto">
             <div className="bg-destructive/10 border border-destructive/30 rounded-xl p-6 space-y-4">
               <div className="flex items-start gap-3">
@@ -776,8 +861,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* Loading state */}
-        {isComparing && (
+        {/* Loading state（查詢中但尚無結果）*/}
+        {isComparing && !hasResults && (
           <div className="max-w-4xl mx-auto">
             <div className="bg-card border border-border rounded-xl p-8 text-center space-y-4">
               <div className="flex justify-center">
@@ -789,9 +874,14 @@ export default function Home() {
               <div>
                 <p className="text-foreground font-medium">正在查詢全球 App Store 價格...</p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  同時爬取 130+ 個國家/地區的內購資料，請稍候約 15-30 秒
+                  同時爬取 130+ 個國家/地區的內購資料，查到一個國家就立即顯示
                 </p>
               </div>
+              {streamProgress && (
+                <div className="max-w-sm mx-auto">
+                  <ProgressBar progress={streamProgress} />
+                </div>
+              )}
               <div className="flex flex-wrap justify-center gap-1">
                 {["🇹🇼","🇯🇵","🇺🇸","🇬🇧","🇩🇪","🇫🇷","🇰🇷","🇨🇳","🇭🇰","🇸🇬","🇦🇺","🇮🇳","🇧🇷","🇲🇽","🇦🇷","🇹🇷","🇷🇺","🇸🇦","🇦🇪","🇿🇦","🇳🇬","🇰🇪","🇵🇱","🇸🇪","🇳🇴"].map((flag, i) => (
                   <span
@@ -807,8 +897,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* Results */}
-        {compareResult && !isComparing && selectedApp && (
+        {/* Results（有資料就顯示，不等全部完成）*/}
+        {hasResults && selectedApp && (
           <div className="max-w-5xl mx-auto space-y-4">
             {/* App info card */}
             <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-4">
@@ -828,21 +918,32 @@ export default function Home() {
                 <p className="text-sm text-muted-foreground">{selectedApp.developer}</p>
                 <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                   <span className="text-xs text-muted-foreground">
-                    查詢 {compareResult.countries.length} 個國家 · 取得 {availableCountries.length} 個有資料
+                    已查詢 {streamCountries.length} 個國家 · {availableCountries.length} 個有資料
+                    {isComparing && <span className="text-amber-400 ml-1">（查詢中...）</span>}
+                    {streamDone && <span className="text-emerald-400 ml-1">✓ 查詢完成</span>}
                   </span>
-                  <span className="text-xs text-muted-foreground">
-                    {compareResult.exchangeSource === "api" ? "✓ 即時匯率" : "⚠ 備用匯率"}
-                  </span>
+                  {streamMeta && (
+                    <span className="text-xs text-muted-foreground">
+                      {streamMeta.exchangeSource === "api" ? "✓ 即時匯率" : "⚠ 備用匯率"}
+                    </span>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => handleSelectApp(selectedApp)}
+                    disabled={isComparing}
                     className="h-6 text-xs gap-1 text-muted-foreground hover:text-foreground px-2"
                   >
                     <RefreshCw className="w-3 h-3" />
                     重新查詢
                   </Button>
                 </div>
+                {/* 進度條（查詢中才顯示）*/}
+                {isComparing && streamProgress && (
+                  <div className="mt-2 max-w-xs">
+                    <ProgressBar progress={streamProgress} />
+                  </div>
+                )}
               </div>
             </div>
 
@@ -861,7 +962,7 @@ export default function Home() {
                   <p className="text-xs text-emerald-400 mb-1">最常最便宜的國家</p>
                   <div className="flex flex-wrap gap-2">
                     {topCheapCountries.map(([cc, count]) => {
-                      const c = compareResult.countries.find((x) => x.countryCode === cc);
+                      const c = streamCountries.find((x) => x.countryCode === cc);
                       return c ? (
                         <span key={`top-cheap-${cc}`} className="text-sm text-emerald-300 font-medium">
                           {c.flag} {c.countryName}
@@ -881,6 +982,12 @@ export default function Home() {
                   <div className="flex items-center gap-2">
                     <TrendingDown className="w-4 h-4 text-primary" />
                     <span className="text-sm font-medium text-foreground">各國內購價格比較</span>
+                    {isComparing && (
+                      <span className="text-xs text-amber-400 flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        更新中
+                      </span>
+                    )}
                   </div>
                   <span className="text-xs text-muted-foreground">所有價格換算為 TWD · 點擊展開詳細</span>
                 </div>
@@ -890,7 +997,7 @@ export default function Home() {
                     <PriceTableRow
                       key={`iap-${item.key}`}
                       item={item}
-                      countries={compareResult.countries}
+                      countries={streamCountries}
                       selectedRegion={selectedRegion}
                       showOnlyWithData={showOnlyWithData}
                       onRegionChange={setSelectedRegion}
@@ -900,25 +1007,27 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <div className="bg-card border border-border rounded-xl p-8 text-center space-y-2">
-                <AlertCircle className="w-8 h-8 text-muted-foreground mx-auto" />
-                <p className="text-foreground font-medium">未找到內購項目</p>
-                <p className="text-sm text-muted-foreground">
-                  此遊戲可能沒有內購，或各國 App Store 頁面格式不同
-                </p>
-              </div>
+              streamDone && (
+                <div className="bg-card border border-border rounded-xl p-8 text-center space-y-2">
+                  <AlertCircle className="w-8 h-8 text-muted-foreground mx-auto" />
+                  <p className="text-foreground font-medium">未找到內購項目</p>
+                  <p className="text-sm text-muted-foreground">
+                    此遊戲可能沒有內購，或各國 App Store 頁面格式不同
+                  </p>
+                </div>
+              )
             )}
 
-            {/* No-data countries summary */}
-            {compareResult.countries.filter((c) => c.items.length === 0).length > 0 && (
+            {/* No-data countries summary（查詢完成後才顯示）*/}
+            {streamDone && streamCountries.filter((c) => c.items.length === 0).length > 0 && (
               <details className="bg-card/50 border border-border/50 rounded-lg">
                 <summary className="px-4 py-2.5 text-xs text-muted-foreground cursor-pointer">
                   <span className="text-amber-400">⚠</span>{" "}
-                  {compareResult.countries.filter((c) => c.items.length === 0).length}{" "}
+                  {streamCountries.filter((c) => c.items.length === 0).length}{" "}
                   個地區未取得資料（點擊展開）
                 </summary>
                 <div className="px-4 pb-3 flex flex-wrap gap-1.5">
-                  {compareResult.countries
+                  {streamCountries
                     .filter((c) => c.items.length === 0)
                     .map((c) => (
                       <span
@@ -971,27 +1080,23 @@ export default function Home() {
               <button onClick={() => setSearchTerm("絕區零")} className="text-primary hover:underline mx-1">
                 絕區零
               </button>
-              、
+              ·
               <button onClick={() => setSearchTerm("原神")} className="text-primary hover:underline mx-1">
                 原神
               </button>
-              、
-              <button
-                onClick={() => setSearchTerm("Clash of Clans")}
-                className="text-primary hover:underline mx-1"
-              >
+              ·
+              <button onClick={() => setSearchTerm("Clash of Clans")} className="text-primary hover:underline mx-1">
                 Clash of Clans
               </button>
             </div>
           </div>
         )}
-      </div>
 
-      <footer className="border-t border-border mt-12 py-4">
-        <div className="container text-center text-xs text-muted-foreground">
+        {/* Footer */}
+        <footer className="text-center text-xs text-muted-foreground py-4">
           資料來源：Apple App Store 各國官方頁面 · 匯率來源：open.er-api.com · 僅供參考，實際價格以 App Store 為準
-        </div>
-      </footer>
+        </footer>
+      </div>
     </div>
   );
 }
