@@ -30,6 +30,13 @@ export interface StreamEvent {
     symbol: string;
     flag: string;
     region: string;
+    /**
+     * status 欄位：
+     * - 'available'   : 有抓到內購資料
+     * - 'unpublished' : 未上架（404 或無內購）
+     * - 'error'       : 查詢失敗（網路錯誤等）
+     */
+    status: 'available' | 'unpublished' | 'error';
     items: Array<{
       name: string;
       price: number;
@@ -136,10 +143,16 @@ export function registerCompareStreamRoute(app: Express) {
               if (isAborted) return;
 
               try {
-                const items = await scrapeCountryIAP(appId, country.code);
+                const result = await scrapeCountryIAP(appId, country.code);
                 completed++;
 
-                // 立即推送這個國家的結果
+                // 計算 status
+                const status: 'available' | 'unpublished' | 'error' =
+                  result.errorMsg ? 'error' :
+                  result.unpublished ? 'unpublished' :
+                  result.items.length > 0 ? 'available' : 'unpublished';
+
+                // 立即推送這個國家的結果（包含 status，未上架也推送）
                 sendEvent({
                   type: "country",
                   data: {
@@ -149,7 +162,8 @@ export function registerCompareStreamRoute(app: Express) {
                     symbol: country.symbol,
                     flag: country.flag,
                     region: country.region,
-                    items: items.map((item) => {
+                    status,
+                    items: result.items.map((item) => {
                       const twdAmount = convertToTWD(item.price, item.currency, rates);
                       return {
                         ...item,
@@ -157,6 +171,7 @@ export function registerCompareStreamRoute(app: Express) {
                         twdFormatted: formatTWD(twdAmount),
                       };
                     }),
+                    error: result.errorMsg,
                   },
                   progress: { completed, total },
                 });
@@ -171,6 +186,7 @@ export function registerCompareStreamRoute(app: Express) {
                     symbol: country.symbol,
                     flag: country.flag,
                     region: country.region,
+                    status: 'error',
                     items: [],
                     error: err instanceof Error ? err.message : "查詢失敗",
                   },

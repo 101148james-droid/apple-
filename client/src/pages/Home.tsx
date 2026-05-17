@@ -54,6 +54,8 @@ interface CountryResult {
   symbol: string;
   flag: string;
   region: string;
+  /** 上架狀態： available=有資料, unpublished=未上架, error=查詢失敗 */
+  status: 'available' | 'unpublished' | 'error';
   items: IAPItemWithTWD[];
   error?: string;
 }
@@ -221,6 +223,7 @@ interface PriceTableRowProps {
 
 function PriceTableRow({ item, countries, selectedRegion, showOnlyWithData, onRegionChange, onShowOnlyChange }: PriceTableRowProps) {
   const [expanded, setExpanded] = useState(false);
+  const [showUnpublished, setShowUnpublished] = useState(false);
 
   const allPrices = useMemo(() => {
     return Array.from(item.countryPrices.entries())
@@ -230,6 +233,22 @@ function PriceTableRow({ item, countries, selectedRegion, showOnlyWithData, onRe
       })
       .sort((a, b) => a.price.twd - b.price.twd);
   }, [item.countryPrices, countries]);
+
+  // 未上架的國家（在這個內購項目沒有價格的國家）
+  const unpublishedForItem = useMemo(() => {
+    const withPriceCodes = new Set(item.countryPrices.keys());
+    return countries.filter((c) =>
+      (c.status === 'unpublished' || (c.status === 'available' && !withPriceCodes.has(c.countryCode)))
+      && (selectedRegion === '全部' || c.region === selectedRegion)
+    );
+  }, [countries, item.countryPrices, selectedRegion]);
+
+  const errorForItem = useMemo(() => {
+    return countries.filter((c) =>
+      c.status === 'error'
+      && (selectedRegion === '全部' || c.region === selectedRegion)
+    );
+  }, [countries, selectedRegion]);
 
   const filteredPrices = useMemo(() => {
     let list = allPrices;
@@ -409,6 +428,71 @@ function PriceTableRow({ item, countries, selectedRegion, showOnlyWithData, onRe
               </tbody>
             </table>
           </div>
+
+          {/* 未上架與查詢失敗國家完整清單 */}
+          {(unpublishedForItem.length > 0 || errorForItem.length > 0) && (
+            <div className="border-t border-border/50">
+              <button
+                onClick={() => setShowUnpublished((v) => !v)}
+                className="w-full px-4 py-2 flex items-center justify-between text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <span>
+                  {unpublishedForItem.length > 0 && (
+                    <span className="mr-3">
+                      <span className="text-muted-foreground/60">未上架</span>
+                      <span className="ml-1 text-muted-foreground/40">{unpublishedForItem.length} 國</span>
+                    </span>
+                  )}
+                  {errorForItem.length > 0 && (
+                    <span>
+                      <span className="text-amber-500/70">查詢失敗</span>
+                      <span className="ml-1 text-muted-foreground/40">{errorForItem.length} 國</span>
+                    </span>
+                  )}
+                </span>
+                <span className="text-muted-foreground/40">{showUnpublished ? '收起' : '展開完整清單'}</span>
+              </button>
+
+              {showUnpublished && (
+                <div className="px-4 pb-3 space-y-2">
+                  {unpublishedForItem.length > 0 && (
+                    <div>
+                      <p className="text-xs text-muted-foreground/60 mb-1.5">未上架國家（該遊戲在此國尚未上架或無內購）</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {unpublishedForItem.map((c) => (
+                          <span
+                            key={`unpub-${item.key}-${c.countryCode}`}
+                            className="inline-flex items-center gap-1 text-xs text-muted-foreground/50 bg-muted/30 px-2 py-0.5 rounded"
+                          >
+                            <span>{c.flag}</span>
+                            <span>{c.countryName}</span>
+                            <span className="text-muted-foreground/30">未上架</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {errorForItem.length > 0 && (
+                    <div>
+                      <p className="text-xs text-amber-500/70 mb-1.5">查詢失敗國家（可能是網路問題或 Rate Limit）</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {errorForItem.map((c) => (
+                          <span
+                            key={`err-${item.key}-${c.countryCode}`}
+                            className="inline-flex items-center gap-1 text-xs text-amber-500/50 bg-amber-950/20 px-2 py-0.5 rounded"
+                          >
+                            <span>{c.flag}</span>
+                            <span>{c.countryName}</span>
+                            <span className="text-amber-500/40">查詢失敗</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -542,7 +626,11 @@ export default function Home() {
             setStreamProgress(msg.progress);
             if (msg.meta) setStreamMeta(msg.meta);
           } else if (msg.type === "country" && msg.data) {
-            setStreamCountries((prev) => [...prev, msg.data]);
+            // 保留全部國家（含未上架），不過濾
+            setStreamCountries((prev) => [...prev, {
+              ...msg.data,
+              status: msg.data.status ?? (msg.data.items?.length > 0 ? 'available' : 'unpublished'),
+            }]);
             if (msg.progress) setStreamProgress(msg.progress);
           } else if (msg.type === "done") {
             setStreamDone(true);
@@ -596,8 +684,21 @@ export default function Home() {
     [streamCountries]
   );
 
+  // 有內購資料的國家
   const availableCountries = useMemo(
-    () => streamCountries.filter((c) => c.items.length > 0),
+    () => streamCountries.filter((c) => c.status === 'available' && c.items.length > 0),
+    [streamCountries]
+  );
+
+  // 未上架的國家
+  const unpublishedCountries = useMemo(
+    () => streamCountries.filter((c) => c.status === 'unpublished'),
+    [streamCountries]
+  );
+
+  // 查詢失敗的國家
+  const errorCountries = useMemo(
+    () => streamCountries.filter((c) => c.status === 'error'),
     [streamCountries]
   );
 
@@ -918,7 +1019,14 @@ export default function Home() {
                 <p className="text-sm text-muted-foreground">{selectedApp.developer}</p>
                 <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                   <span className="text-xs text-muted-foreground">
-                    已查詢 {streamCountries.length} 個國家 · {availableCountries.length} 個有資料
+                    已查詢 {streamCountries.length} 個國家
+                    <span className="text-emerald-400 ml-1">· {availableCountries.length} 個有資料</span>
+                    {unpublishedCountries.length > 0 && (
+                      <span className="text-muted-foreground/60 ml-1">· {unpublishedCountries.length} 個未上架</span>
+                    )}
+                    {errorCountries.length > 0 && (
+                      <span className="text-amber-500 ml-1">· {errorCountries.length} 個查詢失敗</span>
+                    )}
                     {isComparing && <span className="text-amber-400 ml-1">（查詢中...）</span>}
                     {streamDone && <span className="text-emerald-400 ml-1">✓ 查詢完成</span>}
                   </span>
@@ -956,7 +1064,10 @@ export default function Home() {
                 </div>
                 <div className="bg-card border border-border rounded-lg p-3 text-center">
                   <p className="text-xs text-muted-foreground">有資料國家</p>
-                  <p className="text-2xl font-bold text-foreground mt-1">{availableCountries.length}</p>
+                  <p className="text-2xl font-bold text-emerald-400 mt-1">{availableCountries.length}</p>
+                  {unpublishedCountries.length > 0 && streamDone && (
+                    <p className="text-xs text-muted-foreground/60 mt-0.5">{unpublishedCountries.length} 未上架</p>
+                  )}
                 </div>
                 <div className="bg-emerald-950/40 border border-emerald-800/40 rounded-lg p-3 col-span-2">
                   <p className="text-xs text-emerald-400 mb-1">最常最便宜的國家</p>
@@ -1018,27 +1129,21 @@ export default function Home() {
               )
             )}
 
-            {/* No-data countries summary（查詢完成後才顯示）*/}
-            {streamDone && streamCountries.filter((c) => c.items.length === 0).length > 0 && (
-              <details className="bg-card/50 border border-border/50 rounded-lg">
-                <summary className="px-4 py-2.5 text-xs text-muted-foreground cursor-pointer">
-                  <span className="text-amber-400">⚠</span>{" "}
-                  {streamCountries.filter((c) => c.items.length === 0).length}{" "}
-                  個地區未取得資料（點擊展開）
-                </summary>
-                <div className="px-4 pb-3 flex flex-wrap gap-1.5">
-                  {streamCountries
-                    .filter((c) => c.items.length === 0)
-                    .map((c) => (
-                      <span
-                        key={`nodata-${c.countryCode}`}
-                        className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded"
-                      >
-                        {c.flag} {c.countryName}
-                      </span>
-                    ))}
+            {/* 查詢完成後顯示全國狀態摘要 */}
+            {streamDone && (
+              <div className="bg-card/30 border border-border/30 rounded-lg px-4 py-3 text-xs text-muted-foreground space-y-1">
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  <span>已查詢 <span className="text-foreground font-medium">{streamCountries.length}</span> 個國家/地區</span>
+                  <span className="text-emerald-400">有內購資料 <span className="font-medium">{availableCountries.length}</span> 國</span>
+                  {unpublishedCountries.length > 0 && (
+                    <span className="text-muted-foreground/60">未上架 <span className="font-medium">{unpublishedCountries.length}</span> 國</span>
+                  )}
+                  {errorCountries.length > 0 && (
+                    <span className="text-amber-500/70">查詢失敗 <span className="font-medium">{errorCountries.length}</span> 國（可重試）</span>
+                  )}
                 </div>
-              </details>
+                <p className="text-muted-foreground/50">展開內購項目後可點擊「展開完整清單」查看全部國家的上架狀態</p>
+              </div>
             )}
           </div>
         )}

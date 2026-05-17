@@ -201,6 +201,13 @@ export interface CountryIAPResult {
   flag: string;
   region: string;
   items: IAPItem[];
+  /**
+   * status 欄位說明：
+   * - 'available'   : 有抓到內購資料
+   * - 'unpublished' : 該遊戲在此國未上架（404 或無內購）
+   * - 'error'       : 查詢過程中發生錯誤（網路逾時、Rate Limit 等）
+   */
+  status: 'available' | 'unpublished' | 'error';
   error?: string;
 }
 
@@ -259,13 +266,17 @@ export async function searchApps(term: string, country = "tw"): Promise<AppInfo[
 }
 
 // 從 App Store 網頁爬取某國的內購項目（含指數退避重試）
-export async function scrapeCountryIAP(appId: string, countryCode: string): Promise<IAPItem[]> {
+// 回傳 { items, unpublished, errorMsg } 而非直接過濾，讓呼叫端決定如何標記狀態
+export async function scrapeCountryIAP(
+  appId: string,
+  countryCode: string
+): Promise<{ items: IAPItem[]; unpublished: boolean; errorMsg?: string }> {
   const country = SUPPORTED_COUNTRIES.find((c) => c.code === countryCode);
-  if (!country) return [];
+  if (!country) return { items: [], unpublished: true };
 
   const url = `https://apps.apple.com/${countryCode}/app/id${appId}`;
 
-  return withRetry(async () => {
+  return withRetry<{ items: IAPItem[]; unpublished: boolean; errorMsg?: string }>(async () => {
     const response = await axios.get(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -290,16 +301,16 @@ export async function scrapeCountryIAP(appId: string, countryCode: string): Prom
       },
     });
 
-    // 非 200 回應（如 404 App 未上架）→ 直接回傳空陣列
+    // 非 200 回應（如 404 App 未上架）→ 回傳空陣列，讓呼叫端標記 unpublished
     if (response.status !== 200) {
-      return [];
+      return { items: [], unpublished: true };
     }
 
     const html = response.data as string;
 
     // 安全檢查：確保回應是 HTML 而非 JSON 錯誤
     if (!html || typeof html !== "string" || html.length < 100) {
-      return [];
+      return { items: [], unpublished: true };
     }
 
     const $ = cheerio.load(html);
@@ -342,10 +353,10 @@ export async function scrapeCountryIAP(appId: string, countryCode: string): Prom
       }
     }
 
-    return items;
+    return { items, unpublished: false };
   }, 3, 1000).catch((err) => {
     console.error(`[scrapeCountryIAP] Failed for ${countryCode}/${appId} after retries:`, err instanceof Error ? err.message : err);
-    return [];
+    return { items: [], unpublished: false, errorMsg: err instanceof Error ? err.message : String(err) };
   });
 }
 
@@ -585,7 +596,11 @@ export async function scrapeAllCountriesIAP(appId: string, countryCodes?: string
     const batchResults = await Promise.allSettled(
       batch.map((country) =>
         limit(async () => {
-          const items = await scrapeCountryIAP(appId, country.code);
+          const result = await scrapeCountryIAP(appId, country.code);
+          const status: CountryIAPResult['status'] =
+            result.errorMsg ? 'error' :
+            result.unpublished ? 'unpublished' :
+            result.items.length > 0 ? 'available' : 'unpublished';
           return {
             countryCode: country.code,
             countryName: country.name,
@@ -593,13 +608,15 @@ export async function scrapeAllCountriesIAP(appId: string, countryCodes?: string
             symbol: country.symbol,
             flag: country.flag,
             region: country.region,
-            items,
+            items: result.items,
+            status,
+            error: result.errorMsg,
           } as CountryIAPResult;
         })
       )
     );
 
-    batchResults.forEach((result, idx) => {
+      batchResults.forEach((result, idx) => {
       if (result.status === "fulfilled") {
         allResults.push(result.value);
       } else {
@@ -611,6 +628,7 @@ export async function scrapeAllCountriesIAP(appId: string, countryCodes?: string
           flag: batch[idx].flag,
           region: batch[idx].region,
           items: [],
+          status: 'error' as const,
           error: result.reason instanceof Error ? result.reason.message : "查詢失敗",
         });
       }

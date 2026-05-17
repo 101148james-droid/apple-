@@ -130,3 +130,11 @@
 - [x] Bug 4：parsePrice 加強逗號小數點清洗（1,99 $US → 1.99 → NT$正確金額）
 - [x] Bug 2：前端漸進式渲染（後端 SSE 串流 /api/compare-stream，查到一國就顯示一國）
 - [x] 新增 Bug 4 測試案例（7 個），52 個測試全部通過，TypeScript 0 errors
+
+## 全量查詢修復（第十四批）
+- [x] 確認 SUPPORTED_COUNTRIES 清單完整涵蓋 153 個 Apple App Store 國家代碼
+- [x] 後端 scrapeCountryIAP 回傳 status: 'unpublished' 而非過濾掉無資料國家
+- [x] compareStream.ts 同步傳遞 unpublished/error 狀態給前端
+- [x] 前端比價表格展開後可點擊「展開完整清單」查看未上架/失敗國家
+- [x] App info card 顯示已查詢/有資料/未上架/失敗數量
+- [x] 52 個測試全部通過，TypeScript 0 errors
