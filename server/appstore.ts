@@ -1,7 +1,23 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
 
+// ============================================================
+// 重要說明：
+// Apple App Store 網頁的 text-pair 結構中沒有 currency 欄位，
+// 只有格式化價格字串（如 "$4.99"、"¥1,200"）。
+//
+// 幣別判斷策略：
+// 1. 以 SUPPORTED_COUNTRIES 中的 currency 欄位為主（已修正為實際計價幣別）
+// 2. 只有當價格字串中「明確包含不同的貨幣代碼」（如 USD 4.99、0,49 USD）時才覆蓋
+//
+// 關鍵修正：以下國家的 App Store 實際使用 USD 計價（非本地貨幣）：
+// 黎巴嫩(LB)、衣索比亞(ET)、孟加拉(BD)、伊拉克(IQ)、葉門(YE)、伊朗(IR)
+// 緬甸(MM)、柬埔寨(KH)、斯里蘭卡(LK)、尼泊爾(NP)、不丹(BT)
+// 寮國(LA)、馬達加斯加(MG)、維德角(CV)、蘇利南(SR)
+// ============================================================
+
 // 所有 App Store 支援的國家/地區（175 個）
+// currency 欄位代表「App Store 實際計價幣別」（非一定是本地貨幣）
 export const SUPPORTED_COUNTRIES = [
   // 亞太地區
   { code: "tw", name: "台灣", currency: "TWD", symbol: "NT$", flag: "🇹🇼", region: "亞太" },
@@ -19,17 +35,18 @@ export const SUPPORTED_COUNTRIES = [
   { code: "my", name: "馬來西亞", currency: "MYR", symbol: "RM", flag: "🇲🇾", region: "亞太" },
   { code: "vn", name: "越南", currency: "VND", symbol: "₫", flag: "🇻🇳", region: "亞太" },
   { code: "pk", name: "巴基斯坦", currency: "PKR", symbol: "₨", flag: "🇵🇰", region: "亞太" },
-  { code: "bd", name: "孟加拉", currency: "BDT", symbol: "৳", flag: "🇧🇩", region: "亞太" },
-  { code: "lk", name: "斯里蘭卡", currency: "LKR", symbol: "Rs", flag: "🇱🇰", region: "亞太" },
-  { code: "np", name: "尼泊爾", currency: "NPR", symbol: "Rs", flag: "🇳🇵", region: "亞太" },
-  { code: "kh", name: "柬埔寨", currency: "KHR", symbol: "៛", flag: "🇰🇭", region: "亞太" },
-  { code: "mm", name: "緬甸", currency: "MMK", symbol: "K", flag: "🇲🇲", region: "亞太" },
+  // 以下國家 App Store 實際使用 USD 計價（已驗證）
+  { code: "bd", name: "孟加拉", currency: "USD", symbol: "$", flag: "🇧🇩", region: "亞太" },
+  { code: "lk", name: "斯里蘭卡", currency: "USD", symbol: "$", flag: "🇱🇰", region: "亞太" },
+  { code: "np", name: "尼泊爾", currency: "USD", symbol: "$", flag: "🇳🇵", region: "亞太" },
+  { code: "kh", name: "柬埔寨", currency: "USD", symbol: "$", flag: "🇰🇭", region: "亞太" },
+  { code: "mm", name: "緬甸", currency: "USD", symbol: "$", flag: "🇲🇲", region: "亞太" },
   { code: "mn", name: "蒙古", currency: "MNT", symbol: "₮", flag: "🇲🇳", region: "亞太" },
   { code: "fj", name: "斐濟", currency: "FJD", symbol: "FJ$", flag: "🇫🇯", region: "亞太" },
   { code: "pg", name: "巴布亞紐幾內亞", currency: "PGK", symbol: "K", flag: "🇵🇬", region: "亞太" },
-  { code: "bt", name: "不丹", currency: "BTN", symbol: "Nu", flag: "🇧🇹", region: "亞太" },
+  { code: "bt", name: "不丹", currency: "USD", symbol: "$", flag: "🇧🇹", region: "亞太" },
   { code: "mv", name: "馬爾地夫", currency: "MVR", symbol: "Rf", flag: "🇲🇻", region: "亞太" },
-  { code: "la", name: "寮國", currency: "LAK", symbol: "₭", flag: "🇱🇦", region: "亞太" },
+  { code: "la", name: "寮國", currency: "USD", symbol: "$", flag: "🇱🇦", region: "亞太" },
   { code: "pw", name: "帛琉", currency: "USD", symbol: "$", flag: "🇵🇼", region: "亞太" },
   { code: "fm", name: "密克羅尼西亞", currency: "USD", symbol: "$", flag: "🇫🇲", region: "亞太" },
   { code: "ws", name: "薩摩亞", currency: "WST", symbol: "T", flag: "🇼🇸", region: "亞太" },
@@ -112,7 +129,7 @@ export const SUPPORTED_COUNTRIES = [
   { code: "bs", name: "巴哈馬", currency: "BSD", symbol: "B$", flag: "🇧🇸", region: "美洲" },
   { code: "bz", name: "貝里斯", currency: "BZD", symbol: "BZ$", flag: "🇧🇿", region: "美洲" },
   { code: "gy", name: "蓋亞那", currency: "GYD", symbol: "G$", flag: "🇬🇾", region: "美洲" },
-  { code: "sr", name: "蘇利南", currency: "SRD", symbol: "$", flag: "🇸🇷", region: "美洲" },
+  { code: "sr", name: "蘇利南", currency: "USD", symbol: "$", flag: "🇸🇷", region: "美洲" },
   // 中東
   { code: "sa", name: "沙烏地阿拉伯", currency: "SAR", symbol: "﷼", flag: "🇸🇦", region: "中東" },
   { code: "ae", name: "阿聯酋", currency: "AED", symbol: "د.إ", flag: "🇦🇪", region: "中東" },
@@ -123,10 +140,11 @@ export const SUPPORTED_COUNTRIES = [
   { code: "bh", name: "巴林", currency: "BHD", symbol: "BD", flag: "🇧🇭", region: "中東" },
   { code: "qa", name: "卡達", currency: "QAR", symbol: "QR", flag: "🇶🇦", region: "中東" },
   { code: "om", name: "阿曼", currency: "OMR", symbol: "OMR", flag: "🇴🇲", region: "中東" },
-  { code: "lb", name: "黎巴嫩", currency: "LBP", symbol: "L£", flag: "🇱🇧", region: "中東" },
-  { code: "iq", name: "伊拉克", currency: "IQD", symbol: "ع.د", flag: "🇮🇶", region: "中東" },
-  { code: "ir", name: "伊朗", currency: "IRR", symbol: "﷼", flag: "🇮🇷", region: "中東" },
-  { code: "ye", name: "葉門", currency: "YER", symbol: "﷼", flag: "🇾🇪", region: "中東" },
+  // 以下中東/非洲國家 App Store 實際使用 USD 計價（已驗證）
+  { code: "lb", name: "黎巴嫩", currency: "USD", symbol: "$", flag: "🇱🇧", region: "中東" },
+  { code: "iq", name: "伊拉克", currency: "USD", symbol: "$", flag: "🇮🇶", region: "中東" },
+  { code: "ir", name: "伊朗", currency: "USD", symbol: "$", flag: "🇮🇷", region: "中東" },
+  { code: "ye", name: "葉門", currency: "USD", symbol: "$", flag: "🇾🇪", region: "中東" },
   // 非洲
   { code: "za", name: "南非", currency: "ZAR", symbol: "R", flag: "🇿🇦", region: "非洲" },
   { code: "ng", name: "奈及利亞", currency: "NGN", symbol: "₦", flag: "🇳🇬", region: "非洲" },
@@ -134,7 +152,7 @@ export const SUPPORTED_COUNTRIES = [
   { code: "gh", name: "迦納", currency: "GHS", symbol: "GH₵", flag: "🇬🇭", region: "非洲" },
   { code: "tz", name: "坦尚尼亞", currency: "TZS", symbol: "TSh", flag: "🇹🇿", region: "非洲" },
   { code: "ug", name: "烏干達", currency: "UGX", symbol: "USh", flag: "🇺🇬", region: "非洲" },
-  { code: "et", name: "衣索比亞", currency: "ETB", symbol: "Br", flag: "🇪🇹", region: "非洲" },
+  { code: "et", name: "衣索比亞", currency: "USD", symbol: "$", flag: "🇪🇹", region: "非洲" },
   { code: "cm", name: "喀麥隆", currency: "XAF", symbol: "FCFA", flag: "🇨🇲", region: "非洲" },
   { code: "ci", name: "象牙海岸", currency: "XOF", symbol: "CFA", flag: "🇨🇮", region: "非洲" },
   { code: "sn", name: "塞內加爾", currency: "XOF", symbol: "CFA", flag: "🇸🇳", region: "非洲" },
@@ -149,8 +167,8 @@ export const SUPPORTED_COUNTRIES = [
   { code: "na", name: "納米比亞", currency: "NAD", symbol: "N$", flag: "🇳🇦", region: "非洲" },
   { code: "mu", name: "模里西斯", currency: "MUR", symbol: "Rs", flag: "🇲🇺", region: "非洲" },
   { code: "rw", name: "盧安達", currency: "RWF", symbol: "RF", flag: "🇷🇼", region: "非洲" },
-  { code: "mg", name: "馬達加斯加", currency: "MGA", symbol: "Ar", flag: "🇲🇬", region: "非洲" },
-  { code: "cv", name: "維德角", currency: "CVE", symbol: "$", flag: "🇨🇻", region: "非洲" },
+  { code: "mg", name: "馬達加斯加", currency: "USD", symbol: "$", flag: "🇲🇬", region: "非洲" },
+  { code: "cv", name: "維德角", currency: "USD", symbol: "$", flag: "🇨🇻", region: "非洲" },
   { code: "gm", name: "甘比亞", currency: "GMD", symbol: "D", flag: "🇬🇲", region: "非洲" },
   { code: "sl", name: "獅子山", currency: "SLL", symbol: "Le", flag: "🇸🇱", region: "非洲" },
   { code: "lr", name: "賴比瑞亞", currency: "LRD", symbol: "L$", flag: "🇱🇷", region: "非洲" },
@@ -219,14 +237,26 @@ export async function scrapeCountryIAP(appId: string, countryCode: string): Prom
       },
       timeout: 8000,
       decompress: true,
+      // 確保非 2xx 也不拋出異常，讓我們自行處理
+      validateStatus: (status) => status < 500,
     });
 
-    const html = response.data as string;
-    const $ = cheerio.load(html);
+    // 非 200 回應（如 404 App 未上架）→ 直接回傳空陣列
+    if (response.status !== 200) {
+      return [];
+    }
 
+    const html = response.data as string;
+
+    // 安全檢查：確保回應是 HTML 而非 JSON 錯誤
+    if (!html || typeof html !== "string" || html.length < 100) {
+      return [];
+    }
+
+    const $ = cheerio.load(html);
     const items: IAPItem[] = [];
 
-    // 方法一：從 HTML 中的 text-pair 結構提取（支援 svelte class 格式）
+    // 從 HTML 中的 text-pair 結構提取（支援 svelte class 格式）
     // App Store 使用 <div class="text-pair svelte-xxx"><span>名稱</span> <span>價格</span></div>
     $('[class*="text-pair"]').each((_, el) => {
       const spans = $(el).find("span");
@@ -234,7 +264,8 @@ export async function scrapeCountryIAP(appId: string, countryCode: string): Prom
         const name = $(spans[0]).text().trim();
         const priceText = $(spans[1]).text().trim();
         if (name && priceText && priceText !== name && priceText.length > 0) {
-          // 以 country.currency 為主，只有字串中明確包含不同貨幣代碼時才覆蓋
+          // 以 country.currency 為主（已修正為實際計價幣別）
+          // 只有當價格字串中「明確包含不同的貨幣代碼」時才覆蓋
           const detectedCurrency = detectCurrencyFromPrice(priceText, country.currency);
           const parsed = parsePrice(priceText, detectedCurrency);
           if (parsed !== null) {
@@ -249,7 +280,7 @@ export async function scrapeCountryIAP(appId: string, countryCode: string): Prom
       }
     });
 
-    // 方法二：從 JSON 資料中提取（備用）
+    // 備用：從 JSON 資料中提取
     if (items.length === 0) {
       const jsonMatch = html.match(/<script[^>]*id="serialized-server-data"[^>]*>([\s\S]*?)<\/script>/);
       if (jsonMatch) {
@@ -271,16 +302,27 @@ export async function scrapeCountryIAP(appId: string, countryCode: string): Prom
 
 // 常見貨幣符號對應表
 const SYMBOL_TO_CURRENCY: Record<string, string> = {
-  "$": "USD",   // 美元符號（僅在明確後置且與 defaultCurrency 不同時使用）
-  "€": "EUR",   "\u00a3": "GBP",   "¥": "JPY",
-  "₩": "KRW",   "₹": "INR",   "₺": "TRY",
-  "₽": "RUB",   "₴": "UAH",   "₸": "KZT",
-  "₼": "AZN",   "₾": "GEL",   "₯": "GRD",
-  "₦": "NGN",   "₨": "PKR",   "₱": "PHP",
-  "₫": "VND",   "₪": "ILS",   "₧": "ESP",
-  "฿": "THB",   "៛": "KHR",   "₮": "MNT",
-  "₭": "LAK",   "₲": "PYG",   "₳": "ARS",
-  "₵": "GHS",   "₶": "LVL",   "₷": "PHP",
+  "€": "EUR",
+  "\u00a3": "GBP",
+  "¥": "JPY",
+  "₩": "KRW",
+  "₹": "INR",
+  "₺": "TRY",
+  "₽": "RUB",
+  "₴": "UAH",
+  "₸": "KZT",
+  "₼": "AZN",
+  "₾": "GEL",
+  "₦": "NGN",
+  "₨": "PKR",
+  "₱": "PHP",
+  "₫": "VND",
+  "₪": "ILS",
+  "฿": "THB",
+  "₮": "MNT",
+  "₭": "LAK",
+  "₲": "PYG",
+  "₵": "GHS",
 };
 
 // 非標準貨幣代碼對應表（某些地區 App Store 使用非 ISO 格式）
@@ -302,21 +344,21 @@ const NON_STANDARD_CURRENCY_CODES: Record<string, string> = {
 /**
  * 從價格文字偵測實際貨幣。
  *
- * 核心原則：以 defaultCurrency（即 country.currency）為主。
+ * 核心原則：以 defaultCurrency（即 country.currency，已修正為實際計價幣別）為主。
  * 只有當價格字串中「明確包含不同的貨幣代碼」（如 USD 4.99、0,49 USD、$US 4.99）時，
  * 才覆蓋為偵測到的貨幣。
  *
  * 不再依賴 $ 符號推斷 USD：
  * - 台灣 $3,290.00 → TWD（不是 USD）
  * - 阿根廷 $1,999 → ARS（不是 USD）
- * - 緬甸/斯里蘭卡 USD 4.99 → USD（字串明確寫了 USD）
+ * - 黎巴嫩 $4.99 → USD（因為 country.currency 已修正為 USD）
+ * - 緬甸 USD 4.99 → USD（字串明確寫了 USD）
  */
 export function detectCurrencyFromPrice(priceText: string, defaultCurrency: string): string {
   // 先將 NBSP (\xa0) 和其他不可見空白替換成普通空格
   const text = priceText.replace(/[\u00a0\u202f\u2009\u2007\u2008]/g, " ").trim();
 
   // 1. 前置非標準代碼（如 $US 4.99、US$ 4.99、HK$ 4.99）
-  //    只有偵測到的貨幣與 defaultCurrency 不同時才覆蓋
   for (const [code, currency] of Object.entries(NON_STANDARD_CURRENCY_CODES)) {
     const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     if (new RegExp(`^${escaped}\\s*[\\d]`).test(text)) {
@@ -325,7 +367,6 @@ export function detectCurrencyFromPrice(priceText: string, defaultCurrency: stri
   }
 
   // 2. 前置標準貨幣代碼（如 USD 4.99、EUR 9.99）
-  //    只有偵測到的貨幣與 defaultCurrency 不同時才覆蓋
   const prefixCodeMatch = text.match(/^([A-Z]{3})\s+[\d]/);
   if (prefixCodeMatch && prefixCodeMatch[1] !== defaultCurrency) return prefixCodeMatch[1];
 
@@ -342,7 +383,6 @@ export function detectCurrencyFromPrice(priceText: string, defaultCurrency: stri
   if (suffixCodeMatch && suffixCodeMatch[1] !== defaultCurrency) return suffixCodeMatch[1];
 
   // 5. 後置貨幣符號（如 0,39 € 或 0.49£）
-  //    只有符號對應的貨幣與 defaultCurrency 不同時才覆蓋
   const suffixSymbolMatch = text.match(/[\d][\d.,]*\s*([^\d.,\s]+)$/);
   if (suffixSymbolMatch) {
     const sym = suffixSymbolMatch[1].trim();
@@ -351,8 +391,7 @@ export function detectCurrencyFromPrice(priceText: string, defaultCurrency: stri
     }
   }
 
-  // 注意：不再用前置 $ 符號推斷 USD。
-  // 台灣 $3,290.00 → TWD，阿根廷 $1,999 → ARS，緬甸 USD 4.99 → USD（已在步驟2處理）
+  // 回傳預設貨幣（已是正確的計價幣別）
   return defaultCurrency;
 }
 
@@ -374,43 +413,35 @@ export function parsePrice(priceText: string, currency: string): number | null {
 
   if (!cleaned) return null;
 
-  // 無小數點貨幣列表（提前宣告以便判斷千分位 vs 小數點）
-  const noDecimalCurrenciesCheck = ["JPY","KRW","IDR","VND","CLP","PYG","UGX","RWF","KHR","MMK","LAK","MNT","ISK","XAF","XOF","MGA","SLL","LBP","IQD","IRR","YER","DZD","UZS"];
-  const isNoDecimal = noDecimalCurrenciesCheck.includes(currency);
+  // 無小數點貨幣列表
+  const noDecimalCurrencies = ["JPY","KRW","IDR","VND","CLP","PYG","UGX","RWF","KHR","MMK","LAK","MNT","ISK","XAF","XOF","MGA","SLL","LBP","IQD","IRR","YER","DZD","UZS"];
+  const isNoDecimal = noDecimalCurrencies.includes(currency);
 
   const dotCount = cleaned.split(".").length - 1;
   const commaCount = cleaned.split(",").length - 1;
 
   if (dotCount > 1) {
-    // 多個點：點是千分位，移除
     cleaned = cleaned.replace(/\./g, "");
   } else if (commaCount > 1) {
-    // 多個逗號：逗號是千分位，移除
     cleaned = cleaned.replace(/,/g, "");
   } else if (dotCount === 1 && commaCount === 1) {
     const dotPos = cleaned.lastIndexOf(".");
     const commaPos = cleaned.lastIndexOf(",");
     if (dotPos > commaPos) {
-      // 點在後：逗號是千分位
       cleaned = cleaned.replace(/,/g, "");
     } else {
-      // 逗號在後：點是千分位，逗號是小數點
       cleaned = cleaned.replace(/\./g, "").replace(",", ".");
     }
   } else if (dotCount === 1) {
     const parts = cleaned.split(".");
     if (parts[1] && parts[1].length === 3 && parts[0].length > 0 && isNoDecimal) {
-      // 無小數點貨幣（如 IDR）：.XXX 是千分位
       cleaned = cleaned.replace(".", "");
     }
-    // 對於有小數點的貨幣，保留原樣（點是小數點）
   } else if (commaCount === 1) {
     const parts = cleaned.split(",");
     if (parts[1] && parts[1].length === 3 && parts[0].length > 0) {
-      // 千分位
       cleaned = cleaned.replace(",", "");
     } else {
-      // 小數點
       cleaned = cleaned.replace(",", ".");
     }
   }
@@ -418,11 +449,7 @@ export function parsePrice(priceText: string, currency: string): number | null {
   const num = parseFloat(cleaned);
   if (isNaN(num) || num <= 0) return null;
 
-  // 無小數點貨幣
-  const noDecimalCurrencies = ["JPY", "KRW", "IDR", "VND", "CLP", "PYG", "UGX", "RWF", "KHR", "MMK", "LAK", "MNT", "ISK", "XAF", "XOF", "MGA", "SLL", "LBP", "IQD", "IRR", "YER", "DZD", "UZS"];
-  if (noDecimalCurrencies.includes(currency)) {
-    return Math.round(num);
-  }
+  if (isNoDecimal) return Math.round(num);
   return num;
 }
 

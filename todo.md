@@ -63,3 +63,29 @@
 - [x] 匯出 detectCurrencyFromPrice 和 parsePrice 供測試直接引用
 - [x] 更新單元測試（43 個全部通過）：新增台灣/阿根廷 $ 符號保持原貨幣的測試案例
 - [x] TypeScript 0 errors
+
+## Bug 修復（第七批）
+- [x] 研究 Apple App Store 網頁結構：確認無 tier/productId/currency 欄位，只有格式化字串
+- [x] 修正幣別根本問題：在 SUPPORTED_COUNTRIES 中直接修正實際計價幣別
+  - 黃巴嫩 (lb): LBP → USD（$4.99 → NT$162，不再是 NT$0）
+  - 衣索比亞 (et): ETB → USD（$99.99 → NT$3,249，不再是 NT$20）
+  - 緬甸 (mm): MMK → USD
+  - 柬埔寨 (kh): KHR → USD
+  - 孟加拉 (bd): BDT → USD
+  - 斯里蘭卡 (lk): LKR → USD
+  - 尼泊爾 (np): NPR → USD
+  - 不丹 (bt): BTN → USD
+  - 寢國 (la): LAK → USD
+  - 伊拉克 (iq): IQD → USD
+  - 伊朗 (ir): IRR → USD
+  - 葉門 (ye): YER → USD
+  - 馬達加斯加 (mg): MGA → USD
+  - 維德角 (cv): CVE → USD
+  - 辛巴威 (zw): ZWL → USD
+  - 蘇利南 (sr): SRD → USD
+- [x] 重構前端分組邏輯：
+  - extractNumericKey 改為只提取 3 位以上數字（避免 Bundle12/Bundle22 誤合併）
+  - buildComparisonTable 改用優先級系統（tw=0, hk=1, 其他中文=2, 英文=3）
+  - 台灣有上架時強制顯示台灣中文名稱
+- [x] 強化 API 錯誤防護：axios validateStatus 防止非 2xx 拋出異常
+- [x] 44 個單元測試全部通過，TypeScript 0 errors

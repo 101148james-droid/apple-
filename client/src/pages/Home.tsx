@@ -73,42 +73,55 @@ function normalizeIAPName(name: string): string {
 }
 
 /**
- * 從商品名稱中提取「純數字」作為分組 key。
- * 例如：
- *   "400 WC"          → "400"
- *   "월드코인 400개"    → "400"
- *   "400 楓世界金幣"   → "400"
- *   "6480 創世結晶"    → "6480"
- *   "Starter Pack"    → null（無數字，不合併）
+ * 從商品名稱中提取「主要數字」作為分組 key。
  *
  * 策略：
- * 1. 先嘗試提取所有連續數字序列（忽略千分位逗號/點）
- * 2. 若只有一個數字序列 → 用該數字作為 key
- * 3. 若有多個數字序列 → 取最大的那個（通常是面額）
+ * 1. 移除千分位符號後，提取所有數字序列
+ * 2. 取「最大的數字」（通常是面額，如 6480、400、1980）
+ * 3. 過濾掉 1-2 位的短數字（可能是序號，如 Bundle12 中的 12）
+ *    但若名稱中只有短數字，仍回傳（避免全部退回名稱比對）
  * 4. 若無數字 → 回傳 null，退回名稱比對
+ *
+ * 注意：Bundle12 和 Bundle22 中的 12/22 都是短數字，
+ * 若過濾後無顯著數字，回傳 null，讓它們用名稱比對（不強行合併）。
  */
 function extractNumericKey(name: string): string | null {
-  // 移除千分位分隔符號後提取數字
   const cleaned = name.replace(/[,，.]/g, "");
   const numbers = cleaned.match(/\d+/g);
   if (!numbers || numbers.length === 0) return null;
-  // 過濾掉太短的數字（1-2 位，可能是序號）
-  const significant = numbers.filter((n) => n.length >= 2);
-  if (significant.length === 0) return numbers[numbers.length - 1];
+  // 過濾掉 1-3 位的短數字（可能是序號或版本號）
+  const significant = numbers.filter((n) => n.length >= 3);
+  if (significant.length === 0) return null; // 沒有顯著數字，退回名稱比對
   // 取最大值（面額通常是最大的數字）
   return significant.reduce((max, n) =>
     parseInt(n, 10) > parseInt(max, 10) ? n : max
   );
 }
 
+/**
+ * 判斷名稱是否為中文（繁體或簡體）
+ */
+function isChinese(name: string): boolean {
+  return /[\u4e00-\u9fff\u3400-\u4dbf]/.test(name);
+}
+
 function buildComparisonTable(countries: CountryResult[]): ComparisonRow[] {
-  // itemMap key = 分組識別碼，value = { displayName, countryPrices }
+  // ============================================================
   // 分組策略：
-  //   1. 先嘗試用「數字 key」分組（合併同面額不同語言名稱）
-  //   2. 若無數字，退回「正規化名稱」分組
-  //   3. 同一 key 下，displayName 優先選台灣版本，其次選英文，最後選最先出現的
+  // 1. 先嘗試用「顯著數字 key」分組（合併同面額不同語言名稱）
+  //    - 顯著數字：3位以上（如 400、1980、6480）
+  //    - 短數字（如 Bundle12 的 12）不作為分組 key
+  // 2. 若無顯著數字，退回「正規化名稱」分組
+  //
+  // 命名策略（強制台灣/香港中文優先）：
+  // 1. 優先使用台灣 (tw) 的名稱
+  // 2. 其次使用香港 (hk) 的名稱
+  // 3. 若都沒有，使用任何中文名稱
+  // 4. 最後才使用英文名稱
+  // ============================================================
   const itemMap = new Map<string, {
     displayName: string;
+    displayNamePriority: number; // 0=tw, 1=hk, 2=other-chinese, 3=english
     numericKey: string | null;
     countryPrices: Map<string, { twd: number; formatted: string; originalName: string }>;
   }>();
@@ -116,12 +129,12 @@ function buildComparisonTable(countries: CountryResult[]): ComparisonRow[] {
   for (const country of countries) {
     for (const item of country.items) {
       const numKey = extractNumericKey(item.name);
-      // 用數字 key 優先，否則用正規化名稱
       const groupKey = numKey ? `num:${numKey}` : `name:${normalizeIAPName(item.name)}`;
 
       if (!itemMap.has(groupKey)) {
         itemMap.set(groupKey, {
           displayName: item.name,
+          displayNamePriority: 99,
           numericKey: numKey,
           countryPrices: new Map(),
         });
@@ -129,10 +142,22 @@ function buildComparisonTable(countries: CountryResult[]): ComparisonRow[] {
 
       const entry = itemMap.get(groupKey)!;
 
-      // 優先用台灣版本的名稱作為顯示名稱
-      if (country.countryCode === "tw" || 
-          (entry.displayName !== item.name && /^[A-Za-z0-9 ]+$/.test(item.name))) {
+      // 計算此名稱的優先級
+      let priority: number;
+      if (country.countryCode === "tw") {
+        priority = 0; // 台灣最優先
+      } else if (country.countryCode === "hk") {
+        priority = 1; // 香港其次
+      } else if (isChinese(item.name)) {
+        priority = 2; // 其他中文
+      } else {
+        priority = 3; // 英文或其他語言
+      }
+
+      // 優先級更高（數字更小）才更新顯示名稱
+      if (priority < entry.displayNamePriority) {
         entry.displayName = item.name;
+        entry.displayNamePriority = priority;
       }
 
       const existing = entry.countryPrices.get(country.countryCode);

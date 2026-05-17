@@ -213,11 +213,21 @@ describe("price parsing logic", () => {
 
   // ===== detectCurrencyFromPrice 測試 =====
 
-  it("應正確偵測前置 USD 代碼（緬甸/斯里蘭卡）", () => {
-    // 緬甸 (MMK) 和斯里蘭卡 (LKR) 的 App Store 有時用 USD 計價
-    expect(detectCurrencyFromPrice("USD 4.99", "MMK")).toBe("USD");
-    expect(detectCurrencyFromPrice("USD 9.99", "LKR")).toBe("USD");
-    expect(detectCurrencyFromPrice("USD 4.99", "KHR")).toBe("USD");
+  it("應正確偵測前置 USD 代碼（字串明確包含 USD）", () => {
+    // 字串中明確包含 USD 代碼，應覆蓋預設幣別
+    expect(detectCurrencyFromPrice("USD 4.99", "EUR")).toBe("USD");
+    expect(detectCurrencyFromPrice("USD 9.99", "GBP")).toBe("USD");
+    // 默認幣別已是 USD 的國家（字串用 $ 符號，默認幣別不變）
+    expect(detectCurrencyFromPrice("$4.99", "USD")).toBe("USD"); // 緬甸、黑巴嫩等
+    expect(detectCurrencyFromPrice("$9.99", "USD")).toBe("USD"); // 黃巴嫩等
+  });
+
+  it("黃巴嫩/$4.99 應保持 USD（已修正幣別為 USD）", () => {
+    // 黃巴嫩、衣索比亞等國家 App Store 實際用 USD 計價
+    // SUPPORTED_COUNTRIES 中已將這些國家的 currency 改為 USD
+    expect(detectCurrencyFromPrice("$4.99", "USD")).toBe("USD"); // 黃巴嫩 (lb)
+    expect(detectCurrencyFromPrice("$99.99", "USD")).toBe("USD"); // 衣索比亞 (et)
+    expect(detectCurrencyFromPrice("$4.99", "USD")).toBe("USD"); // 緬甸 (mm)
   });
 
   it("應正確偵測後置 USD 代碼（0,49 USD）", () => {
