@@ -217,7 +217,7 @@ export async function scrapeCountryIAP(appId: string, countryCode: string): Prom
         "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
         Accept: "text/html,application/xhtml+xml",
       },
-      timeout: 15000,
+      timeout: 8000,
       decompress: true,
     });
 
@@ -444,8 +444,8 @@ export async function scrapeAllCountriesIAP(appId: string, countryCodes?: string
     ? SUPPORTED_COUNTRIES.filter((c) => countryCodes.includes(c.code))
     : [...SUPPORTED_COUNTRIES];
 
-  // 分批處理，每批 20 個，避免同時發出太多請求
-  const BATCH_SIZE = 20;
+  // 分批處理，每批 30 個，避免同時發出太多請求
+  const BATCH_SIZE = 30;
   const allResults: CountryIAPResult[] = [];
 
   for (let i = 0; i < targets.length; i += BATCH_SIZE) {

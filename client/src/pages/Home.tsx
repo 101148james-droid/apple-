@@ -375,6 +375,8 @@ export default function Home() {
   const [compareResult, setCompareResult] = useState<CompareResult | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [compareError, setCompareError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [selectedRegion, setSelectedRegion] = useState<Region>("全部");
   const [showOnlyWithData, setShowOnlyWithData] = useState(true);
@@ -396,13 +398,19 @@ export default function Home() {
     setSearchResults([]);
     setSelectedApp(null);
     setCompareResult(null);
+    setSearchError(null);
+    setCompareError(null);
     try {
       const result = await searchQuery.refetch();
       if (result.data) {
         setSearchResults(result.data as AppInfo[]);
-        if (result.data.length === 0) toast.info("找不到相關遊戲，請嘗試其他關鍵字");
+        if (result.data.length === 0) {
+          setSearchError("找不到相關遇戲，請嘗試其他關鍵字");
+        }
       }
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "搜尋失敗";
+      setSearchError(`搜尋失敗：${msg}。請檢查網路連線或稍後再試。`);
       toast.error("搜尋失敗，請稍後再試");
     } finally {
       setIsSearching(false);
@@ -414,6 +422,7 @@ export default function Home() {
       setSelectedApp(app);
       setSearchResults([]);
       setCompareResult(null);
+      setCompareError(null);
       setIsComparing(true);
       try {
         const result = await compareMutation.mutateAsync({
@@ -424,7 +433,19 @@ export default function Home() {
         });
         setCompareResult(result as CompareResult);
         if (showHistory) historyQuery.refetch();
-      } catch {
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "未知錯誤";
+        const isTimeout = msg.includes("超時") || msg.includes("timeout") || msg.includes("TIMEOUT");
+        const isNetwork = msg.includes("network") || msg.includes("fetch") || msg.includes("ECONNREFUSED");
+        let friendlyMsg: string;
+        if (isTimeout) {
+          friendlyMsg = "查詢超時（查詢 130+ 國家需要較長時間），請再按一次「重新查詢」。";
+        } else if (isNetwork) {
+          friendlyMsg = "網路連線失敗，請檢查網路狀態後再試。";
+        } else {
+          friendlyMsg = `查詢失敗：${msg}。請稍後再試。`;
+        }
+        setCompareError(friendlyMsg);
         toast.error("比價失敗，請稍後再試");
       } finally {
         setIsComparing(false);
@@ -521,6 +542,14 @@ export default function Home() {
               搜尋
             </Button>
           </div>
+
+          {/* Search error */}
+          {searchError && searchResults.length === 0 && !isSearching && (
+            <div className="bg-destructive/10 border border-destructive/30 rounded-lg px-4 py-3 flex items-start gap-3">
+              <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-destructive">{searchError}</p>
+            </div>
+          )}
 
           {/* Search results dropdown */}
           {searchResults.length > 0 && (
@@ -628,6 +657,46 @@ export default function Home() {
             ) : (
               <div className="py-8 text-center text-muted-foreground text-sm">尚無查詢記錄</div>
             )}
+          </div>
+        )}
+
+        {/* Compare error */}
+        {compareError && !isComparing && selectedApp && !compareResult && (
+          <div className="max-w-4xl mx-auto">
+            <div className="bg-destructive/10 border border-destructive/30 rounded-xl p-6 space-y-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-destructive mb-1">查詢失敗</p>
+                  <p className="text-sm text-destructive/80">{compareError}</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setCompareError(null);
+                    handleSelectApp(selectedApp);
+                  }}
+                  className="gap-1.5 text-xs"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  重新查詢
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setCompareError(null);
+                    setSelectedApp(null);
+                  }}
+                  className="text-xs text-muted-foreground"
+                >
+                  返回搜尋
+                </Button>
+              </div>
+            </div>
           </div>
         )}
 

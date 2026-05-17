@@ -56,11 +56,32 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ input }) => {
-        // 並行：爬取各國 IAP + 取得匯率
-        const [countryResults, exchangeData] = await Promise.all([
-          scrapeAllCountriesIAP(input.appId, input.countries),
-          getExchangeRates(),
-        ]);
+        // 整體超時保護：150 秒（部署環境限制 180 秒）
+        let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(() => reject(new Error("QUERY_TIMEOUT")), 150_000);
+        });
+
+        let countryResults: Awaited<ReturnType<typeof scrapeAllCountriesIAP>>;
+        let exchangeData: Awaited<ReturnType<typeof getExchangeRates>>;
+
+        try {
+          // 並行：爬取各國 IAP + 取得匯率（帶整體超時保護）
+          [countryResults, exchangeData] = await Promise.race([
+            Promise.all([
+              scrapeAllCountriesIAP(input.appId, input.countries),
+              getExchangeRates(),
+            ]),
+            timeoutPromise,
+          ]) as [Awaited<ReturnType<typeof scrapeAllCountriesIAP>>, Awaited<ReturnType<typeof getExchangeRates>>];
+        } catch (err) {
+          if (err instanceof Error && err.message === "QUERY_TIMEOUT") {
+            throw new Error("查詢超時，請稍後再試（部分國家資料可能未完整載入）");
+          }
+          throw err;
+        } finally {
+          if (timeoutHandle) clearTimeout(timeoutHandle);
+        }
 
         const rates = exchangeData.rates;
 
