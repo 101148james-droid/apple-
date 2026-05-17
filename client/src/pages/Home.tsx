@@ -61,7 +61,7 @@ interface CompareResult {
 interface ComparisonRow {
   key: string;
   displayName: string;
-  countryPrices: Map<string, { twd: number; formatted: string }>;
+  countryPrices: Map<string, { twd: number; formatted: string; originalName?: string }>;
   minTWD: number;
   cheapestCountries: string[];
 }
@@ -72,21 +72,75 @@ function normalizeIAPName(name: string): string {
   return name.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+/**
+ * 從商品名稱中提取「純數字」作為分組 key。
+ * 例如：
+ *   "400 WC"          → "400"
+ *   "월드코인 400개"    → "400"
+ *   "400 楓世界金幣"   → "400"
+ *   "6480 創世結晶"    → "6480"
+ *   "Starter Pack"    → null（無數字，不合併）
+ *
+ * 策略：
+ * 1. 先嘗試提取所有連續數字序列（忽略千分位逗號/點）
+ * 2. 若只有一個數字序列 → 用該數字作為 key
+ * 3. 若有多個數字序列 → 取最大的那個（通常是面額）
+ * 4. 若無數字 → 回傳 null，退回名稱比對
+ */
+function extractNumericKey(name: string): string | null {
+  // 移除千分位分隔符號後提取數字
+  const cleaned = name.replace(/[,，.]/g, "");
+  const numbers = cleaned.match(/\d+/g);
+  if (!numbers || numbers.length === 0) return null;
+  // 過濾掉太短的數字（1-2 位，可能是序號）
+  const significant = numbers.filter((n) => n.length >= 2);
+  if (significant.length === 0) return numbers[numbers.length - 1];
+  // 取最大值（面額通常是最大的數字）
+  return significant.reduce((max, n) =>
+    parseInt(n, 10) > parseInt(max, 10) ? n : max
+  );
+}
+
 function buildComparisonTable(countries: CountryResult[]): ComparisonRow[] {
-  const itemMap = new Map<string, { displayName: string; countryPrices: Map<string, { twd: number; formatted: string }> }>();
+  // itemMap key = 分組識別碼，value = { displayName, countryPrices }
+  // 分組策略：
+  //   1. 先嘗試用「數字 key」分組（合併同面額不同語言名稱）
+  //   2. 若無數字，退回「正規化名稱」分組
+  //   3. 同一 key 下，displayName 優先選台灣版本，其次選英文，最後選最先出現的
+  const itemMap = new Map<string, {
+    displayName: string;
+    numericKey: string | null;
+    countryPrices: Map<string, { twd: number; formatted: string; originalName: string }>;
+  }>();
 
   for (const country of countries) {
     for (const item of country.items) {
-      const key = normalizeIAPName(item.name);
-      if (!itemMap.has(key)) {
-        itemMap.set(key, { displayName: item.name, countryPrices: new Map() });
+      const numKey = extractNumericKey(item.name);
+      // 用數字 key 優先，否則用正規化名稱
+      const groupKey = numKey ? `num:${numKey}` : `name:${normalizeIAPName(item.name)}`;
+
+      if (!itemMap.has(groupKey)) {
+        itemMap.set(groupKey, {
+          displayName: item.name,
+          numericKey: numKey,
+          countryPrices: new Map(),
+        });
       }
-      const entry = itemMap.get(key)!;
+
+      const entry = itemMap.get(groupKey)!;
+
+      // 優先用台灣版本的名稱作為顯示名稱
+      if (country.countryCode === "tw" || 
+          (entry.displayName !== item.name && /^[A-Za-z0-9 ]+$/.test(item.name))) {
+        entry.displayName = item.name;
+      }
+
       const existing = entry.countryPrices.get(country.countryCode);
       if (!existing || item.twdAmount < existing.twd) {
         entry.countryPrices.set(country.countryCode, {
           twd: item.twdAmount,
           formatted: item.formattedPrice,
+          originalName: item.name,
         });
       }
     }

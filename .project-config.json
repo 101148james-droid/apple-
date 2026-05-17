@@ -1,0 +1,43 @@
+{
+  "build_command": "pnpm run build",
+  "capabilities": [
+    "db",
+    "server",
+    "user"
+  ],
+  "dev_command": "pnpm run dev",
+  "env_vars": {
+    "DATABASE_URL": "mysql://RfoT1X7CSbDBbgx.root:I401t82ZscJHjBb1HnFd@gateway05.us-east-1.prod.aws.tidbcloud.com:4000/hcbmZprGt7EJWrMd5jwsTo?ssl={\"rejectUnauthorized\":true}"
+  },
+  "experiments": [
+    "no_db_push"
+  ],
+  "git_remote": {
+    "repo_url": "s3://vida-prod-gitrepo/webdev-git/310519663503479870/hcbmZprGt7EJWrMd5jwsTo",
+    "access_key_id": "ASIAZV3A2ECZACBSCELT",
+    "secret_access_key": "5OmPFcuwfsaEEE4JcOG8LXzRbkQMuqXnwJvw36db",
+    "session_token": "IQoJb3JpZ2luX2VjENn//////////wEaCXVzLWVhc3QtMSJIMEYCIQCrRRq+E2RL7EWAQGMwnZHWpO+Q1eu1Ocb4KB4girWHnwIhAIdRiECLny1kwWhs9voYdsGw08Y+2WWPuy6e5f010vN3Kv8DCKL//////////wEQBBoMNjY1Mzg2MDk4ODY2IgyrwWnMYU+ny+ZHj4Mq0wPL8JMbzfrDxyS9qnEpopoTyXgvBhBz7/QrmZ6QguHq31PIqapfjbMZfwGzXBTOqhRUfSxtyEUug6hwzFNOpGrDDvnh80+HbsO602NIww1mo8VZO/d2M8iAwrK3rXaqeAG02NsGIVeSUKZGnweNQOCLbzUSL4AuRyLGYM62HZBYIDdCN44w1WUuqa685s5j8W4b6E5jdHCuk6jlqG0FQ5NA01AW1TXA4tXsfFuZAP7z+rYzH8yJOjOS/GW9gMBgRuTcijSJzEN633DPYNufpII/bWuUi/u3mSgHXaLw+JxbBaHe2WUiGCJdHJSM3y4fDJW8193dvuv2ocamj07hoJYXwGZJ3kevUQ+xZ+w8lh6NObMyrJCe7wPAPc/o8N48sSTVE9H2bNC00jTz6CZZprApREW9/Kl6IaNSl5NU5vlvqo7xFrdNUDewMc9wy1ohZTA6HdxerjvieTG9ZSWX/oFz2TXzWARvyN/Mia3jsBKs8P4bL55BVv/aDXlp0OioRboaYdazAK5GC2onp/P5HyF2jt6Lao22/GmTJINz8Zj4GEFk07eC1eCrTscHmgQCqtsaCtIwmXN1k46wCK649WjZrs2S7T6iTdqiyCCQpsFRRLSvtDDYg6bQBjqcAY9WkzH4it7FiF4yIlLsA3bDPpd5AEXZ4T1GZofjCdFASNwKVlqz4iSscyfiSXf+DyeWN5n7KvuECFEF/kkK+B2nYcyAZD8jISYN6rYOcyOto9g/wpZsXFCzNPOmAIXKpx5Wrq8vdWWloEotrcpQ9uoBuXI4+RO5w3viDG3hdSmM1+LvX42UG3WF3Q0v3BAcvCn2vvd/hvqP7XkEvw==",
+    "expiration": "2026-05-17T20:52:40.000Z"
+  },
+  "name": "appstore-price-compare",
+  "path": "/home/ubuntu/appstore-price-compare",
+  "port": 3000,
+  "secrets": {
+    "BUILT_IN_FORGE_API_KEY": "dSQHRiRJQYikSKFBWt6KA6",
+    "BUILT_IN_FORGE_API_URL": "https://forge.manus.ai",
+    "JWT_SECRET": "Wdu65JjaFzVCbRsSE2uCiq",
+    "OAUTH_SERVER_URL": "https://api.manus.im",
+    "OWNER_NAME": "湯品翔",
+    "OWNER_OPEN_ID": "THhitPfZnE9WK3az2bE35N",
+    "VITE_ANALYTICS_ENDPOINT": "https://manus-analytics.com",
+    "VITE_ANALYTICS_WEBSITE_ID": "a976b1fe-edc2-4cc1-a44f-67bcae1cba53",
+    "VITE_APP_ID": "hcbmZprGt7EJWrMd5jwsTo",
+    "VITE_APP_LOGO": "https://files.manuscdn.com/user_upload_by_module/web_dev_logo/310519663503479870/lcQGeKbuyjekgAUg.png",
+    "VITE_APP_TITLE": "App Store 內購價格比較工具",
+    "VITE_FRONTEND_FORGE_API_KEY": "8wM48UC226XAJcX8goT3uK",
+    "VITE_FRONTEND_FORGE_API_URL": "https://forge.manus.ai",
+    "VITE_OAUTH_PORTAL_URL": "https://manus.im"
+  },
+  "template_id": "web-db-user",
+  "test_command": "pnpm test"
+}

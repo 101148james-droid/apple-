@@ -284,25 +284,54 @@ const SYMBOL_TO_CURRENCY: Record<string, string> = {
   "₵": "GHS",   "₶": "LVL",   "₷": "PHP",
 };
 
-function detectCurrencyFromPrice(priceText: string, defaultCurrency: string): string {
-  const text = priceText.trim();
+// 非標準貨幣代碼對應表（某些地區 App Store 使用非 ISO 格式）
+const NON_STANDARD_CURRENCY_CODES: Record<string, string> = {
+  "$US": "USD",
+  "US$": "USD",
+  "A$": "AUD",
+  "CA$": "CAD",
+  "HK$": "HKD",
+  "NZ$": "NZD",
+  "S$": "SGD",
+  "R$": "BRL",
+  "MX$": "MXN",
+  "COP$": "COP",
+  "CLP$": "CLP",
+  "ARS$": "ARS",
+};
 
-  // 1. 前置貨幣代碼（如 USD 4.99）
+function detectCurrencyFromPrice(priceText: string, defaultCurrency: string): string {
+  // 先將 NBSP (\xa0) 和其他不可見空白替換成普通空格
+  const text = priceText.replace(/[\u00a0\u202f\u2009\u2007\u2008]/g, " ").trim();
+
+  // 1. 前置非標準代碼（如 $US 4.99、US$ 4.99）
+  for (const [code, currency] of Object.entries(NON_STANDARD_CURRENCY_CODES)) {
+    const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`^${escaped}\\s*[\\d]`).test(text)) return currency;
+  }
+
+  // 2. 前置標準貨幣代碼（如 USD 4.99）
   const prefixCodeMatch = text.match(/^([A-Z]{3})\s+[\d]/);
   if (prefixCodeMatch) return prefixCodeMatch[1];
 
-  // 2. 後置貨幣代碼（如 0,49 USD 或 0.39 USD）
+  // 3. 後置非標準代碼（如 1,99 $US、5,99 $US）
+  for (const [code, currency] of Object.entries(NON_STANDARD_CURRENCY_CODES)) {
+    const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`[\\d]\\s*${escaped}$`).test(text)) return currency;
+  }
+
+  // 4. 後置標準貨幣代碼（如 0,49 USD 或 0.39 USD）
   const suffixCodeMatch = text.match(/[\d][\d.,]*\s+([A-Z]{3})$/);
   if (suffixCodeMatch) return suffixCodeMatch[1];
 
-  // 3. 後置貨幣符號（如 0,39 € 或 0.49£）
+  // 5. 後置貨幣符號（如 0,39 € 或 0.49£）
   const suffixSymbolMatch = text.match(/[\d][\d.,]*\s*([^\d.,\s]+)$/);
   if (suffixSymbolMatch) {
     const sym = suffixSymbolMatch[1].trim();
     if (SYMBOL_TO_CURRENCY[sym]) return SYMBOL_TO_CURRENCY[sym];
   }
 
-  // 4. 前置美元符號 $：如果國家本身不是 USD，則視為 USD 計價
+  // 6. 前置美元符號 $：如果國家本身不是 USD，則視為 USD 計價
   if (text.startsWith("$") && defaultCurrency !== "USD") {
     return "USD";
   }
@@ -311,7 +340,8 @@ function detectCurrencyFromPrice(priceText: string, defaultCurrency: string): st
 }
 
 function parsePrice(priceText: string, currency: string): number | null {
-  const text = priceText.trim();
+  // 將 NBSP (\xa0) 和其他不可見空白替換成普通空格
+  const text = priceText.replace(/[\u00a0\u202f\u2009\u2007\u2008]/g, " ").trim();
 
   // 特殊格式：印尼 ribu（千）
   const ribuMatch = text.match(/([\d.,]+)\s*ribu/i);

@@ -158,27 +158,44 @@ describe("price parsing logic", () => {
     "₴": "UAH", "฿": "THB", "៛": "KHR", "₮": "MNT",
   };
 
+  const NON_STANDARD_CURRENCY_CODES_TEST: Record<string, string> = {
+    "$US": "USD", "US$": "USD", "A$": "AUD", "CA$": "CAD",
+    "HK$": "HKD", "NZ$": "NZD", "S$": "SGD", "R$": "BRL",
+    "MX$": "MXN", "COP$": "COP", "CLP$": "CLP", "ARS$": "ARS",
+  };
+
   function detectCurrencyFromPrice(priceText: string, defaultCurrency: string): string {
-    const text = priceText.trim();
-    // 1. 前置貨幣代碼（USD 4.99）
+    // NBSP 替換
+    const text = priceText.replace(/[\u00a0\u202f\u2009\u2007\u2008]/g, " ").trim();
+    // 1. 前置非標準代碼（$US 4.99、US$ 4.99）
+    for (const [code, currency] of Object.entries(NON_STANDARD_CURRENCY_CODES_TEST)) {
+      const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (new RegExp(`^${escaped}\\s*[\\d]`).test(text)) return currency;
+    }
+    // 2. 前置標準貨幣代碼（USD 4.99）
     const prefixCodeMatch = text.match(/^([A-Z]{3})\s+[\d]/);
     if (prefixCodeMatch) return prefixCodeMatch[1];
-    // 2. 後置貨幣代碼（0,49 USD）
+    // 3. 後置非標準代碼（1,99 $US）
+    for (const [code, currency] of Object.entries(NON_STANDARD_CURRENCY_CODES_TEST)) {
+      const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (new RegExp(`[\\d]\\s*${escaped}$`).test(text)) return currency;
+    }
+    // 4. 後置標準貨幣代碼（0,49 USD）
     const suffixCodeMatch = text.match(/[\d][\d.,]*\s+([A-Z]{3})$/);
     if (suffixCodeMatch) return suffixCodeMatch[1];
-    // 3. 後置貨幣符號（0,39 €）
+    // 5. 後置貨幣符號（0,39 €）
     const suffixSymbolMatch = text.match(/[\d][\d.,]*\s*([^\d.,\s]+)$/);
     if (suffixSymbolMatch) {
       const sym = suffixSymbolMatch[1].trim();
       if (SYMBOL_TO_CURRENCY_TEST[sym]) return SYMBOL_TO_CURRENCY_TEST[sym];
     }
-    // 4. 前置 $ 且國家不是 USD
+    // 6. 前置 $ 且國家不是 USD
     if (text.startsWith("$") && defaultCurrency !== "USD") return "USD";
     return defaultCurrency;
   }
 
   function parsePrice(priceText: string, currency: string): number | null {
-    const text = priceText.trim();
+    const text = priceText.replace(/[\u00a0\u202f\u2009\u2007\u2008]/g, " ").trim();
     const ribuMatch = text.match(/([\d.,]+)\s*ribu/i);
     if (ribuMatch) {
       const numStr = ribuMatch[1].replace(/[.,]/g, "");
@@ -286,5 +303,30 @@ describe("price parsing logic", () => {
     expect(parsePrice("", "TWD")).toBeNull();
     expect(parsePrice("免費", "TWD")).toBeNull();
     expect(parsePrice("Free", "TWD")).toBeNull();
+  });
+
+  it("應正確偵測 $US 非標準代碼（喀麥隆/象牙海岸）", () => {
+    // 喀麥隆格式：5,99\xa0$US
+    expect(detectCurrencyFromPrice("5,99\u00a0$US", "XAF")).toBe("USD");
+    expect(detectCurrencyFromPrice("1,99\u00a0$US", "XAF")).toBe("USD");
+    expect(detectCurrencyFromPrice("4,99\u00a0$US", "XOF")).toBe("USD");
+  });
+
+  it("應正確解析 NBSP 分隔的價格（5,99\xa0$US）", () => {
+    // NBSP 替換後，5,99 $US 應解析為 5.99
+    expect(parsePrice("5,99\u00a0$US", "USD")).toBeCloseTo(5.99, 2);
+    expect(parsePrice("1,99\u00a0$US", "USD")).toBeCloseTo(1.99, 2);
+    expect(parsePrice("99,99\u00a0$US", "USD")).toBeCloseTo(99.99, 2);
+  });
+
+  it("應正確解析 USD NBSP 前置格式（USD\xa04.99）", () => {
+    expect(parsePrice("USD\u00a04.99", "USD")).toBeCloseTo(4.99, 2);
+    expect(parsePrice("USD\u00a09.99", "USD")).toBeCloseTo(9.99, 2);
+  });
+
+  it("應正確解析法式千分位格式（1 999,99）", () => {
+    // 式：空格千分位 + 逗號小數點
+    expect(parsePrice("1 999,99", "EUR")).toBeCloseTo(1999.99, 1);
+    expect(parsePrice("1 999,00", "XAF")).toBe(1999);
   });
 });
