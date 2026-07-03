@@ -218,6 +218,14 @@ export interface CountryIAPResult {
 // 最大同時請求數：嚴格限制在 5 個，避免觸發 Apple Rate Limit
 const CONCURRENCY_LIMIT = 5;
 
+export function isRetryableAppStoreStatus(status: number): boolean {
+  return status === 429 || status === 502 || status === 503;
+}
+
+export function shouldAcceptAppStoreStatus(status: number): boolean {
+  return status < 500 && !isRetryableAppStoreStatus(status);
+}
+
 // 指數退避重試：最多 3 次，每次等待時間加倍
 async function withRetry<T>(
   fn: () => Promise<T>,
@@ -292,13 +300,7 @@ export async function scrapeCountryIAP(
       },
       timeout: 12000,
       decompress: true,
-      validateStatus: (status) => {
-        // 對 503/502/429 拋出錯誤，讓 withRetry 重試
-        if (status === 503 || status === 502 || status === 429) {
-          throw new Error(`HTTP ${status} - Rate limit or service unavailable`);
-        }
-        return status < 500;
-      },
+      validateStatus: shouldAcceptAppStoreStatus,
     });
 
     // 非 200 回應（如 404 App 未上架）→ 回傳空陣列，讓呼叫端標記 unpublished

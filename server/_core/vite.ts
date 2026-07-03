@@ -58,10 +58,23 @@ export function serveStatic(app: Express) {
     );
   }
 
-  app.use(express.static(distPath));
+  app.use(
+    express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        res.setHeader("Cache-Control", getStaticCacheControl(filePath));
+      },
+    })
+  );
 
   // fall through to index.html if the file doesn't exist
   app.use("*", (_req, res) => {
+    res.setHeader("Cache-Control", getStaticCacheControl("index.html"));
     res.sendFile(path.resolve(distPath, "index.html"));
   });
+}
+
+export function getStaticCacheControl(filePath: string): string {
+  if (path.basename(filePath) === "index.html") return "no-store";
+  if (filePath.split(/[\\/]/).includes("assets")) return "public, max-age=31536000, immutable";
+  return "public, max-age=3600";
 }

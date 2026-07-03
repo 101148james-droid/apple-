@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { convertToTWD, formatTWD } from "./exchange";
-import { SUPPORTED_COUNTRIES, detectCurrencyFromPrice, parsePrice } from "./appstore";
+import {
+  SUPPORTED_COUNTRIES,
+  detectCurrencyFromPrice,
+  isRetryableAppStoreStatus,
+  parsePrice,
+  shouldAcceptAppStoreStatus,
+} from "./appstore";
 
 describe("exchange rate conversion", () => {
   const mockRates: Record<string, number> = {
@@ -146,6 +152,22 @@ describe("SUPPORTED_COUNTRIES", () => {
 describe("auth.logout", () => {
   it("passes basic sanity check", () => {
     expect(true).toBe(true);
+  });
+});
+
+describe("App Store HTTP status handling", () => {
+  it("rejects retryable rate-limit statuses without throwing from validateStatus", () => {
+    expect(isRetryableAppStoreStatus(429)).toBe(true);
+    expect(isRetryableAppStoreStatus(502)).toBe(true);
+    expect(isRetryableAppStoreStatus(503)).toBe(true);
+    expect(shouldAcceptAppStoreStatus(429)).toBe(false);
+    expect(shouldAcceptAppStoreStatus(502)).toBe(false);
+    expect(shouldAcceptAppStoreStatus(503)).toBe(false);
+  });
+
+  it("accepts non-500 statuses so unpublished apps can be handled as data", () => {
+    expect(shouldAcceptAppStoreStatus(200)).toBe(true);
+    expect(shouldAcceptAppStoreStatus(404)).toBe(true);
   });
 });
 

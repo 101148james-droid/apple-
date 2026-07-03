@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +27,7 @@ import {
   X,
   Filter,
 } from "lucide-react";
+import { compareIAPDisplayNames, getIAPDisplayName, getIAPDisplayPriority, getIAPGroupKey } from "@shared/iapGrouping";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -132,41 +134,29 @@ function buildComparisonTable(countries: CountryResult[]): ComparisonRow[] {
   const itemMap = new Map<string, {
     displayName: string;
     displayNamePriority: number; // 0=tw, 1=hk, 2=other-chinese, 3=english
-    numericKey: string | null;
     countryPrices: Map<string, { twd: number; formatted: string; originalName: string }>;
   }>();
 
   for (const country of countries) {
     for (const item of country.items) {
-      const numKey = extractNumericKey(item.name);
-      const groupKey = numKey ? `num:${numKey}` : `name:${normalizeIAPName(item.name)}`;
+      const groupKey = getIAPGroupKey(item.name);
 
       if (!itemMap.has(groupKey)) {
         itemMap.set(groupKey, {
           displayName: item.name,
           displayNamePriority: 99,
-          numericKey: numKey,
           countryPrices: new Map(),
         });
       }
 
       const entry = itemMap.get(groupKey)!;
 
-      // 計算此名稱的優先級
-      let priority: number;
-      if (country.countryCode === "tw") {
-        priority = 0; // 台灣最優先
-      } else if (country.countryCode === "hk") {
-        priority = 1; // 香港其次
-      } else if (isChinese(item.name)) {
-        priority = 2; // 其他中文
-      } else {
-        priority = 3; // 英文或其他語言
-      }
+      const displayName = getIAPDisplayName(item.name);
+      const priority = displayName !== item.name ? -1 : getIAPDisplayPriority(item.name, country.countryCode);
 
       // 優先級更高（數字更小）才更新顯示名稱
       if (priority < entry.displayNamePriority) {
-        entry.displayName = item.name;
+        entry.displayName = displayName;
         entry.displayNamePriority = priority;
       }
 
@@ -188,7 +178,7 @@ function buildComparisonTable(countries: CountryResult[]): ComparisonRow[] {
       const cheapestCountries = prices.filter(([, p]) => p.twd === minTWD).map(([code]) => code);
       return { key, displayName: val.displayName, countryPrices: val.countryPrices, minTWD, cheapestCountries };
     })
-    .sort((a, b) => a.minTWD - b.minTWD);
+    .sort((a, b) => compareIAPDisplayNames(a.displayName, b.displayName));
 }
 
 // 搜尋起點國家選單（主流遊戲大國）
@@ -501,6 +491,42 @@ function PriceTableRow({ item, countries, selectedRegion, showOnlyWithData, onRe
 
 // ─── 進度條元件 ────────────────────────────────────────────────────────────────
 
+function ImageWithFallback({
+  src,
+  alt,
+  className,
+  style,
+  fallbackClassName,
+  children,
+}: {
+  src?: string | null;
+  alt: string;
+  className: string;
+  style?: CSSProperties;
+  fallbackClassName: string;
+  children?: ReactNode;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  if (!src || failed) {
+    return (
+      <div className={fallbackClassName} style={style} aria-label={alt}>
+        {children ?? <Globe className="w-5 h-5 text-muted-foreground" />}
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className={className}
+      style={style}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function ProgressBar({ progress }: { progress: CompareProgress }) {
   const pct = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
   return (
@@ -748,12 +774,13 @@ export default function Home() {
         {/* Brand Badge */}
         <div className="max-w-2xl mx-auto flex justify-center">
           <div className="brand-badge flex items-center gap-3 px-4 py-2.5 rounded-full">
-            <img
-              src="/manus-storage/tx-logo_bf853e23.png"
-              alt="Tx手遊代儲"
-              className="flex-shrink-0 object-cover"
-              style={{ width: 36, height: 36, borderRadius: '50%' }}
-            />
+            <div
+              className="flex-shrink-0 flex items-center justify-center"
+              style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(245,158,11,0.16)', color: '#F59E0B' }}
+              aria-label="Tx手遊代儲"
+            >
+              <ShoppingBag className="w-5 h-5" />
+            </div>
             <div className="text-xs leading-relaxed" style={{ color: 'rgba(226,232,240,0.85)' }}>
               <span className="font-medium" style={{ color: '#FCD34D' }}>開發者：Tx手遊代儲</span>
               <span className="mx-1.5 opacity-40">|</span>
@@ -832,13 +859,12 @@ export default function Home() {
                     onClick={() => handleSelectApp(app)}
                     className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-accent/50 transition-colors text-left"
                   >
-                    {app.icon ? (
-                      <img src={app.icon} alt={app.name} className="w-10 h-10 rounded-xl flex-shrink-0" />
-                    ) : (
-                      <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center flex-shrink-0">
-                        <Globe className="w-5 h-5 text-muted-foreground" />
-                      </div>
-                    )}
+                    <ImageWithFallback
+                      src={app.icon}
+                      alt={app.name}
+                      className="w-10 h-10 rounded-xl flex-shrink-0"
+                      fallbackClassName="w-10 h-10 rounded-xl bg-muted flex items-center justify-center flex-shrink-0"
+                    />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-foreground truncate">{app.name}</p>
                       <p className="text-xs text-muted-foreground truncate">
@@ -891,17 +917,14 @@ export default function Home() {
                       }
                       className="flex items-center gap-3 flex-1 min-w-0 text-left"
                     >
-                      {item.appIcon ? (
-                        <img
-                          src={item.appIcon}
-                          alt={item.appName}
-                          className="w-8 h-8 rounded-lg flex-shrink-0"
-                        />
-                      ) : (
-                        <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
-                          <Globe className="w-4 h-4 text-muted-foreground" />
-                        </div>
-                      )}
+                      <ImageWithFallback
+                        src={item.appIcon}
+                        alt={item.appName}
+                        className="w-8 h-8 rounded-lg flex-shrink-0"
+                        fallbackClassName="w-8 h-8 rounded-lg bg-muted flex items-center justify-center flex-shrink-0"
+                      >
+                        <Globe className="w-4 h-4 text-muted-foreground" />
+                      </ImageWithFallback>
                       <div className="min-w-0">
                         <p className="text-sm text-foreground truncate">{item.appName}</p>
                         <p className="text-xs text-muted-foreground">{item.developer ?? "未知開發商"}</p>
@@ -1003,17 +1026,14 @@ export default function Home() {
           <div className="max-w-5xl mx-auto space-y-4">
             {/* App info card */}
             <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-4">
-              {selectedApp.icon ? (
-                <img
-                  src={selectedApp.icon}
-                  alt={selectedApp.name}
-                  className="w-14 h-14 rounded-2xl flex-shrink-0"
-                />
-              ) : (
-                <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center flex-shrink-0">
-                  <Globe className="w-7 h-7 text-muted-foreground" />
-                </div>
-              )}
+              <ImageWithFallback
+                src={selectedApp.icon}
+                alt={selectedApp.name}
+                className="w-14 h-14 rounded-2xl flex-shrink-0"
+                fallbackClassName="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center flex-shrink-0"
+              >
+                <Globe className="w-7 h-7 text-muted-foreground" />
+              </ImageWithFallback>
               <div className="flex-1 min-w-0">
                 <h2 className="text-lg font-bold text-foreground">{selectedApp.name}</h2>
                 <p className="text-sm text-muted-foreground">{selectedApp.developer}</p>
